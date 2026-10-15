@@ -11,6 +11,7 @@
     "dev": "node --watch --env-file=.env src/server.js",
     "start": "node --env-file=.env src/server.js",
     "seed": "node --env-file=.env src/seed.js",
+    "set-role": "node --env-file=.env src/setRole.js",
     "test": "node --test"
   },
   "dependencies": {
