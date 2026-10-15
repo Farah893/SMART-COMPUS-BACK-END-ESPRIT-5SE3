@@ -7,6 +7,9 @@ import { hashPassword } from "./utils/security.js";
 
 /** Idempotent : matrice de permissions par défaut + premier administrateur s'il n'existe aucun admin. */
 export async function seed() {
+  // Les index uniques (e-mail, rôle+permission) doivent exister AVANT d'insérer : sinon deux instances qui
+  // démarrent ensemble créent des doublons, et MongoDB refuse ensuite de construire l'index.
+  await Promise.all(Object.values(mongoose.models).map((m) => m.init()));
   await seedPermissions();
   if (await User.exists({ role: "admin" })) return;
   const a = config.firstAdmin;
