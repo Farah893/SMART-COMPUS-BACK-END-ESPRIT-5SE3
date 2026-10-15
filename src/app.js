@@ -15,7 +15,11 @@ export function createApp() {
   const app = express();
   app.set("trust proxy", 1); // derrière l'API Gateway : IP réelle dans l'historique de connexion
   app.use(helmet());
-  app.use(cors({ origin: config.corsOrigins, credentials: true }));
+  // En développement, Vite change de port s'il est occupé (5173 → 5174…) : tout localhost est accepté.
+  // En production, seules les origines de CORS_ORIGINS sont autorisées.
+  const localDev = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
+  const allowed = (origin) => config.corsOrigins.includes(origin) || (!config.isProd && localDev.test(origin));
+  app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowed(origin)), credentials: true }));
   app.use(express.json({ limit: "1mb" })); // photo de profil JPEG 256 px en data URL
   if (config.isProd || process.env.NODE_ENV !== "test") app.use(morgan("dev"));
 
