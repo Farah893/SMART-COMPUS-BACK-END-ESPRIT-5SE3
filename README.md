@@ -5,7 +5,7 @@ Node.js 20+ · Express · MongoDB (Mongoose) · JWT · zod · Nodemailer · Rabb
 
 Le contrat d'API suit `src/features/users/README.md` du dépôt front.
 
-Documentation : [`docs/PRD.md`](docs/PRD.md) (besoins) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (architecture et code) · [`docs/INTEGRATION-FRONT-BACK.md`](docs/INTEGRATION-FRONT-BACK.md) (liaison avec le front).
+Documentation : [`docs/GUIDE-INGENIEUR.md`](docs/GUIDE-INGENIEUR.md) (à lire en premier) · [`docs/PRD.md`](docs/PRD.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/INTEGRATION-FRONT-BACK.md`](docs/INTEGRATION-FRONT-BACK.md) · [`docs/DECISIONS.md`](docs/DECISIONS.md) · [`docs/NOTE-EQUIPE.md`](docs/NOTE-EQUIPE.md) (à envoyer aux autres équipes).
 
 ## Démarrer
 
