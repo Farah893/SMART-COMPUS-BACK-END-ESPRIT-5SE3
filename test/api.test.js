@@ -118,8 +118,10 @@ test("rôles : changement, auto-protection de l'admin, matrice verrouillée", as
   assert.equal((await call("DELETE", `/users/${self}`, { token: admin.body.token })).status, 409);
 
   const m = await call("GET", "/roles/permissions", { token: admin.body.token });
-  assert.equal(m.body.permissions.length, 12);
+  assert.equal(m.body.permissions.length, 13);
   assert.equal(m.body.matrix.student["library.borrow"], true);
+  assert.equal(m.body.matrix.admin["academic.manage"], true);
+  assert.equal(m.body.matrix.teacher["academic.manage"], false);
   assert.equal((await call("PUT", "/roles/permissions", { token: admin.body.token, body: { role: "student", key: "clubs.manage", granted: true } })).status, 204);
   assert.equal((await call("GET", "/roles/permissions", { token: admin.body.token })).body.matrix.student["clubs.manage"], true);
   assert.equal((await call("PUT", "/roles/permissions", { token: admin.body.token, body: { role: "admin", key: "users.manage", granted: false } })).status, 403);
