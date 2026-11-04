@@ -130,9 +130,10 @@ docker:
 
 ## 5. Un point technique qui piège : `bash -eo pipefail`
 
-GitHub exécute les blocs `run: |` avec `bash -eo pipefail` : le script **s'arrête à la première commande qui échoue**, y compris au milieu d'un tube `a | b`. Conséquence : un script qui « marche dans mon terminal » peut échouer en CI. C'est pourquoi j'ai rejoué le test de fumée en local avec exactement ce mode avant de pousser :
+**Correction d'une erreur de la première version de ce document** : GitHub n'active **pas** `pipefail` par défaut. Sans précision, un bloc `run: |` s'exécute avec `bash -e` : le script s'arrête à la première commande qui échoue, **mais** dans un tube `a | b` seule la dernière commande compte. Un `curl ... | grep -q ...` dont le `curl` échoue peut donc passer pour réussi. Avec `shell: bash` explicite, GitHub utilise `-eo pipefail`.
+Dans ce dépôt, le test de fumée commence par `set -euo pipefail` : il est strict, et je l'ai rejoué en local dans ce mode avant de pousser.
 ```bash
-bash -eo pipefail script.sh
+bash -eo pipefail script.sh    # reproduire le mode strict en local
 ```
 
 ## 6. Étude de cas : l'incident du 4 novembre (CI rouge, e-mail reçu)

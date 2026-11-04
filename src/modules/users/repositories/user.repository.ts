@@ -26,11 +26,19 @@ export interface UserRepository {
   nextSequence(role: Role): Promise<number>;
 }
 
+/** Champs qu'un patch peut modifier. Toute autre clé est IGNORÉE : même si un appelant passait un objet venu du client
+ *  (`$where`, `__proto__`, `isAdmin`…), elle n'atteindrait jamais MongoDB. */
+const PATCHABLE: ReadonlySet<string> = new Set([
+  "firstName", "lastName", "phone", "avatarUrl", "role", "status", "failedAttempts", "lastLoginAt",
+  "mustChangePassword", "emailVerified", "passwordHash", "tokensValidAfter", "lockedUntil", "verificationPending",
+] satisfies Array<keyof UserPatch>);
+
 /** Transforme un patch en opérateurs MongoDB : `undefined` → `$unset` (sinon Mongoose ignorerait la clé). */
-function toUpdate(patch: UserPatch): Record<string, Record<string, unknown>> {
+export function toUpdate(patch: UserPatch): Record<string, Record<string, unknown>> {
   const $set: Record<string, unknown> = {};
   const $unset: Record<string, ""> = {};
   for (const [key, value] of Object.entries(patch)) {
+    if (!PATCHABLE.has(key)) continue;
     if (value === undefined) $unset[key] = "";
     else $set[key] = value;
   }
@@ -79,6 +87,7 @@ export class MongoUserRepository implements UserRepository {
     if (role) filter.role = role;
     if (status) filter.status = status;
     if (q?.trim()) {
+      // eslint-disable-next-line security/detect-non-literal-regexp -- saisie utilisateur ENTIÈREMENT échappée par escapeRegExp (testé contre un motif ReDoS)
       const re = new RegExp(escapeRegExp(q.trim()), "i");
       filter.$or = [{ firstName: re }, { lastName: re }, { email: re }, { _id: re }];
     }

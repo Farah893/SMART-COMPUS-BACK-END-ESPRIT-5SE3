@@ -14,9 +14,12 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false # le jeton GitHub n'est pas laissé dans .git (inutile ici)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -26,11 +29,14 @@ jobs:
       - run: npm run build
       # Dépendances de production : la CI échoue sur une vulnérabilité haute ou critique.
       - run: npm run audit:prod
+      # Authenticité : chaque paquet installé a une signature (et, si possible, une attestation de provenance) vérifiable.
+      - run: npm audit signatures
       # Tests unitaires + intégration (MongoDB en mémoire) avec seuils de couverture (lignes 90 %, branches 80 %, fonctions 80 %).
       - run: npm run test:coverage
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: check
     services:
       mongo:
@@ -40,11 +46,24 @@ jobs:
           --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false # le jeton GitHub n'est pas laissé dans .git (inutile ici)
       - run: docker build -t smartcampus-user-service .
+      # Analyse de l'image (Trivy) : paquets du système et dépendances connus vulnérables, secrets oubliés dans les couches.
+      # Échoue sur HIGH/CRITICAL qui ont déjà un correctif disponible (--ignore-unfixed : on ne punit pas ce qu'on ne peut pas corriger).
+      - name: Analyse de l'image Docker (Trivy)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.57.1 image             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress smartcampus-user-service
+      # Analyse du Dockerfile et du compose (mauvaises pratiques : utilisateur root, absence de HEALTHCHECK, etc.).
+      - name: Analyse de la configuration Docker (Trivy)
+        run: |
+          docker run --rm -v "$PWD":/w aquasec/trivy:0.57.1 config --severity HIGH,CRITICAL --exit-code 1 --no-progress --skip-dirs /w/node_modules --skip-dirs /w/dist /w
       # Test de fumée du conteneur réel : démarrage, base, amorçage, sondes, connexion de l'administrateur.
       - name: Smoke test
         run: |
+          # GitHub exécute par défaut `bash -e` (SANS pipefail) : on l'active pour que `curl | grep` échoue vraiment.
+          set -euo pipefail
           docker run -d --name svc --network host \
             -e MONGODB_URI=mongodb://127.0.0.1:27017/smoke \
             -e JWT_PRIVATE_KEY="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 | base64 -w0)" \

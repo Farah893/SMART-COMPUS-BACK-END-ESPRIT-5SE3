@@ -5,6 +5,8 @@ import { generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
 import jwt from "jsonwebtoken";
 import { createJwtTokenService } from "../src/infrastructure/security/token-service.js";
+import { toUpdate } from "../src/modules/users/repositories/user.repository.js";
+import type { UserPatch } from "../src/modules/users/types/user.types.js";
 import { createJwksRouter } from "../src/modules/auth/routes/jwks.routes.js";
 import express from "express";
 import { createRateLimiters } from "../src/shared/http/rate-limiters.js";
@@ -160,4 +162,13 @@ test("production : démarre avec une configuration solide (RS256, cookies Secure
   const ok = bootInProduction(GOOD);
   assert.equal(ok.status, 0, ok.stderr);
   assert.match(ok.stdout, /DEMARRE/);
+});
+
+test("mises à jour de compte : seules les clés autorisées atteignent MongoDB (liste blanche)", () => {
+  // JSON.parse crée VRAIMENT une clé « __proto__ » (un littéral d'objet ne le ferait pas) : c'est le cas d'une charge hostile.
+  const hostile = JSON.parse('{"firstName":"Ada","role":"student","$where":"sleep(5000)","isAdmin":true,"__proto__":{"polluted":1},"phone":"123"}') as UserPatch;
+  const update = toUpdate(hostile) as { $set: Record<string, unknown> };
+  assert.deepEqual(Object.keys(update.$set).sort(), ["firstName", "phone", "role"]);
+  assert.equal(({} as Record<string, unknown>).polluted, undefined, "aucune pollution de prototype");
+  assert.deepEqual(toUpdate({ phone: undefined }), { $unset: { phone: "" } }, "undefined supprime toujours le champ");
 });

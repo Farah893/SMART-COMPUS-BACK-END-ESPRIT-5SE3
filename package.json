@@ -16,7 +16,7 @@
     "keys:generate": "node --import tsx src/scripts/generate-keys.ts",
     "set-role": "node --env-file=.env --import tsx src/scripts/set-role.ts",
     "test": "node --import tsx --import ./test/setup.ts --test test/platform.test.ts test/user.service.test.ts test/auth.service.test.ts test/session.service.test.ts test/outbox.test.ts test/security.test.ts test/api.test.ts",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "check": "npm run lint && npm run typecheck && npm test",
     "test:coverage": "node --import tsx --import ./test/setup.ts --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-exclude=\"src/instrumentation.ts\" --test-coverage-exclude=\"src/scripts/**\" --test-coverage-exclude=\"src/server.ts\" --test-coverage-exclude=\"src/docs/**\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=80 --test test/platform.test.ts test/user.service.test.ts test/auth.service.test.ts test/session.service.test.ts test/outbox.test.ts test/security.test.ts test/api.test.ts",
     "audit:prod": "npm audit --omit=dev --audit-level=high"
@@ -57,6 +57,7 @@
     "@types/nodemailer": "^8.0.2",
     "@types/swagger-ui-express": "^4.1.8",
     "eslint": "^10.14.0",
+    "eslint-plugin-security": "^4.2.1",
     "mongodb-memory-server": "^11.3.0",
     "pino-pretty": "^13.2.0",
     "tsx": "^4.23.15",

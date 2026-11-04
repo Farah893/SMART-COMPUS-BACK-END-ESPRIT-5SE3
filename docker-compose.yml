@@ -41,6 +41,14 @@ services:
       RABBITMQ_URL: amqp://rabbitmq:5672
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    # Durcissement du conteneur : système de fichiers en lecture seule, aucune capacité Linux, pas d'élévation de privilèges.
+    read_only: true
+    init: true # processus d'init (tini) : gère les signaux et les processus zombies
+    mem_limit: 512m
+    pids_limit: 256
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       mongo: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }

@@ -91,7 +91,8 @@ function load(source: NodeJS.ProcessEnv) {
     jwtSecret: env.JWT_SECRET,
     jwt: {
       privateKey: env.JWT_PRIVATE_KEY_FILE
-        ? readFileSync(env.JWT_PRIVATE_KEY_FILE, "utf8")
+        ? // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin fourni par l'opérateur (variable d'environnement), jamais par un utilisateur
+          readFileSync(env.JWT_PRIVATE_KEY_FILE, "utf8")
         : env.JWT_PRIVATE_KEY
           ? normalizePem(env.JWT_PRIVATE_KEY)
           : undefined,

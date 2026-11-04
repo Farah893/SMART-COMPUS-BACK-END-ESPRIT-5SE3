@@ -8,3 +8,9 @@ test
 qc
 query
 *.md
+# Jamais dans l'image : clés, secrets, couverture
+keys
+*.pem
+*.key
+.env.*
+coverage

@@ -21,7 +21,8 @@ export class RoleService {
     const matrix = Object.fromEntries(
       ROLES.map((r) => [r, Object.fromEntries(PERMISSIONS.map((p) => [p.key, false]))]),
     ) as PermissionMatrix;
-    for (const { role, key, granted } of rows) if (matrix[role] && key in matrix[role]) matrix[role][key] = granted;
+    // Object.hasOwn (et non `in`) : `in` accepterait aussi les propriétés héritées (constructor, __proto__).
+    for (const { role, key, granted } of rows) if (matrix[role] && Object.hasOwn(matrix[role], key)) matrix[role][key] = granted;
     return { permissions: PERMISSIONS, matrix };
   }
 
