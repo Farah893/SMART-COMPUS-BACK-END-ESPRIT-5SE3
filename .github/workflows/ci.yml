@@ -48,7 +48,7 @@ jobs:
           docker run -d --name svc --network host \
             -e MONGODB_URI=mongodb://127.0.0.1:27017/smoke \
             -e JWT_PRIVATE_KEY="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 | base64 -w0)" \
-            -e FIRST_ADMIN_EMAIL=admin@smartcampus.tn -e FIRST_ADMIN_PASSWORD='Ci-Smoke-2026-Zq7!' -e COOKIE_SECURE=false \
+            -e FIRST_ADMIN_EMAIL=admin@smartcampus.tn -e FIRST_ADMIN_PASSWORD='Ci-Smoke-2026-Zq7!' \
             -e METRICS_TOKEN=ci-metrics-token \
             smartcampus-user-service
           for i in $(seq 1 30); do

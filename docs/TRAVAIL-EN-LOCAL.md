@@ -102,13 +102,12 @@ npm run build          # la version compilée se construit
 La CI refait exactement cela ; autant la devancer.
 
 ### 3.6 Commiter et pousser (rappel)
-Chacun travaille sur sa branche, jamais directement sur `main` :
+Une seule branche par dépôt (`FarahBack` pour le backend, `FarahFront` pour le front) ; vérifier avant chaque `push` :
 ```bash
-git switch -c feature/<sujet>          # une fois
 git add <fichiers>                     # de préférence fichier par fichier ; jamais .env
 git status --short                     # relire ce qui part
 git commit -m "module: ce qui a changé"
-git push -u origin feature/<sujet>     # puis Pull Request vers main
+git push                              # pas de force-push ; la CI doit rester verte
 ```
 Détail complet (récupérer la version à jour, conflits) : `handoff.md` §10. Les commits portent **uniquement le nom de leur auteur** (pas de ligne `Co-Authored-By`).
 

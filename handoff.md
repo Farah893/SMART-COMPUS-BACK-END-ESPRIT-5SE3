@@ -42,10 +42,14 @@ Dernière mise à jour : 2 novembre 2026. Ce document permet à une personne qui
 
 ## 2. Dépôts et branches
 
-| Dépôt | Adresse | Branches |
+**Une seule branche par dépôt** (décision du 4 novembre 2026, plus de `main`) :
+
+| Dépôt | Adresse | Branche unique (et par défaut) |
 |---|---|---|
-| Front | `https://github.com/Farah893/SMART-COMPUS-ESPRIT-5SE3-FRONT-END` | `main` (protégée, à jour) · `feature/users-backend-integration` (déjà fusionnée, supprimable) |
-| Backend (user-service) | `https://github.com/Farah893/SMART-COMPUS-BACK-END-ESPRIT-5SE3` | `main` et `FarahBack` (même contenu) |
+| Front | `https://github.com/Farah893/SMART-COMPUS-ESPRIT-5SE3-FRONT-END` | `FarahFront` |
+| Backend (user-service) | `https://github.com/Farah893/SMART-COMPUS-BACK-END-ESPRIT-5SE3` | `FarahBack` |
+
+Dependabot est **désactivé** (`.github/dependabot.yml`, `open-pull-requests-limit: 0`) : il créait une branche et une pull request par dépendance. Le garde-fou `npm audit --omit=dev` reste dans la CI. Pour le réactiver, voir le commentaire en tête du fichier.
 
 Dossiers sur le PC de Farah : `C:\dev\SMART-COMPUS-ESPRIT-5SE3-FRONT-END` et `C:\dev\SMART-COMPUS-ESPRIT-5SE3-USER-SERVICE`.
 
@@ -147,21 +151,21 @@ Les routes attendues de chaque module sont dans `src/features/<module>/README.md
 
 ## 10. Workflow Git de l'équipe
 
-Personne ne pousse sur `main`. Chacun travaille sur sa branche :
+Chaque dépôt n'a qu'**une seule branche** (`FarahFront` pour le front, `FarahBack` pour le backend). On travaille et on pousse dessus directement :
 ```bash
-git switch main && git pull
-git switch -c feature/<module>-<sujet>
-# ... modifier, puis :
-npm run typecheck && npm run build        # front
-git add . && git commit -m "module: ce qui a changé"
-git push -u origin feature/<module>-<sujet>
+git switch FarahBack && git pull          # (ou FarahFront dans le dépôt du front)
+# ... modifier, puis, avant de pousser :
+npm run check                              # backend : lint + typecheck + tests
+npm run typecheck && npm run lint && npm test && npm run build   # front
+git add -A && git commit -m "module: ce qui a changé"
+git push
 ```
-Puis une **Pull Request** vers `main`, relue par un autre membre, puis *Merge*.
+Comme il n'y a plus de relecture par pull request, **les vérifications ci-dessus sont obligatoires avant chaque `push`**, et la CI du backend doit rester verte (onglet *Actions*). Si l'équipe grandit, recréer une branche par fonctionnalité et une pull request relue par un autre membre.
+Règles : ne jamais pousser avec `--force`, ne jamais commiter un `.env`, une clé (`keys/`, `*.pem`) ni un mot de passe.
 
 **Récupérer la version à jour :**
 - Nouvelle personne : `git clone <adresse>` puis `npm install` et créer son `.env`.
-- Déjà cloné, sans travail en cours : `git switch main && git pull && npm install`.
-- Déjà cloné avec une branche en cours : `git switch main && git pull`, puis `git switch <sa-branche> && git merge main` (résoudre les conflits s'il y en a).
+- Déjà cloné : `git pull && npm install`.
 
 Les commits portent uniquement le nom de leur auteur : pas de ligne `Co-Authored-By`.
 

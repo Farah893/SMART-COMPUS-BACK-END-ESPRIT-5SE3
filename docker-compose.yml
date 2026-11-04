@@ -36,7 +36,7 @@ services:
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?définir JWT_PRIVATE_KEY (clé RSA PEM encodée en base64 ; voir npm run keys:generate)}
       FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:?définir FIRST_ADMIN_EMAIL}
       FIRST_ADMIN_PASSWORD: ${FIRST_ADMIN_PASSWORD:?définir FIRST_ADMIN_PASSWORD (12 caractères minimum, différent de la valeur par défaut)}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false} # false seulement tant que le conteneur est servi en HTTP sur localhost
+      # Cookies Secure (imposé en production). Chrome et Firefox les acceptent sur http://localhost.
       SMTP_HOST: mailpit
       RABBITMQ_URL: amqp://rabbitmq:5672
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
