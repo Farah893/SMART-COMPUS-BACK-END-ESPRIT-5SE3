@@ -52,13 +52,22 @@ jobs:
       - run: docker build -t smartcampus-user-service .
       # Analyse de l'image (Trivy) : paquets du système et dépendances connus vulnérables, secrets oubliés dans les couches.
       # Échoue sur HIGH/CRITICAL qui ont déjà un correctif disponible (--ignore-unfixed : on ne punit pas ce qu'on ne peut pas corriger).
+      # Trivy écrit un rapport JSON ; un petit script le transforme en annotations lisibles (onglet Actions) et fait échouer l'étape.
       - name: Analyse de l'image Docker (Trivy)
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.57.1 image             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress smartcampus-user-service
-      # Analyse du Dockerfile et du compose (mauvaises pratiques : utilisateur root, absence de HEALTHCHECK, etc.).
+          set -euo pipefail
+          if ! docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/out aquasec/trivy:0.57.1 image               --severity HIGH,CRITICAL --ignore-unfixed --no-progress --format json --output /out/trivy-image.json smartcampus-user-service; then
+            echo "::error title=Trivy::erreur d'exécution de Trivy (ce n'est pas un constat de vulnérabilité)"; exit 1
+          fi
+          node .github/scripts/trivy-annotations.mjs trivy-image.json
+      # Analyse du Dockerfile (mauvaises pratiques : utilisateur root, absence de HEALTHCHECK, etc.).
       - name: Analyse de la configuration Docker (Trivy)
         run: |
-          docker run --rm -v "$PWD":/w aquasec/trivy:0.57.1 config --severity HIGH,CRITICAL --exit-code 1 --no-progress --skip-dirs /w/node_modules --skip-dirs /w/dist /w
+          set -euo pipefail
+          if ! docker run --rm -v "$PWD":/w aquasec/trivy:0.57.1 config --severity HIGH,CRITICAL --no-progress --format json --output /w/trivy-config.json               --skip-dirs /w/node_modules --skip-dirs /w/dist /w; then
+            echo "::error title=Trivy::erreur d'exécution de Trivy config (ce n'est pas un constat)"; exit 1
+          fi
+          node .github/scripts/trivy-annotations.mjs trivy-config.json
       # Test de fumée du conteneur réel : démarrage, base, amorçage, sondes, connexion de l'administrateur.
       - name: Smoke test
         run: |

@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 import security from "eslint-plugin-security";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules", "qc", "query"] },
+  { ignores: ["dist", "node_modules", "qc", "query", ".github"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   // SAST : règles de sécurité (injection, regex dangereuses, comparaisons non sûres, accès dynamiques…).
