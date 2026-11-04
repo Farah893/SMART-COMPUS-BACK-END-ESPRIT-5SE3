@@ -197,7 +197,7 @@ Un agent DevSecOps indépendant (lecture seule) a relu workflows, Dockerfile, co
 
 **Ce que j'ai fait** : retiré npm, npx, corepack et yarn de l'**image finale** (`RUN rm -rf …`, voir le Dockerfile). Le service n'en a pas besoin (`CMD ["node", …]`, sonde `wget`), et cela supprime aussi la possibilité d'installer des outils depuis un shell dans le conteneur. Ce n'est pas un contournement : la surface vulnérable n'existe plus, au lieu d'être masquée par un `.trivyignore`.
 
-**Reste à confirmer** : le run GitHub qui suit cette correction (l'image n'a pas pu être construite ni scannée en local, Docker étant arrêté). Voir `docs/PROBLEMES-ET-SOLUTIONS.md` n° 6.
+**Confirmé** : run `eb65915` : l'étape « Analyse de l'image Docker (Trivy) » est **verte** (les 6 constats ont disparu). Run `4345f34` : toute la CI backend est **verte** : `check` (lint, types, build, audit, signatures, tests, couverture) et `docker` (construction de l'image, **Trivy image**, **Trivy Dockerfile**, **test de fumée du conteneur de production**). Voir `docs/PROBLEMES-ET-SOLUTIONS.md` n° 6 et 6b.
 
 ---
 
@@ -219,7 +219,7 @@ Si CodeQL signale quelque chose : suivre le **chemin de la donnée**, corriger, 
 
 - **Aucun SAST ne prouve l'absence de faille.** `eslint-plugin-security` est un outil de motifs ; CodeQL est bien meilleur mais ne voit pas la logique métier (par exemple « un étudiant peut-il lire le profil d'un autre ? » : c'est ce que vérifient les tests d'autorisation et la batterie de 82 attaques).
 - **Trivy dépend de sa base de vulnérabilités** : une faille non encore publiée n'est pas détectée.
-- **L'image n'a pas été analysée en local** (Docker arrêté) : sa première analyse réelle est celle de la CI.
+- **L'image n'a pas été lancée en local** (Docker arrêté sur ce PC) : sa validation repose sur la CI GitHub (construction, Trivy, test de fumée), qui est verte.
 - **Le digest épinglé vieillit** : sans entretien, on livre une image de base de plus en plus ancienne (le scan Trivy est le garde-fou, pas un remède).
 - **Dependabot est désactivé** : plus aucune mise à jour automatique des dépendances ni des actions. À compenser par une revue mensuelle (`npm outdated`, SHA des actions, digest).
 - **Rien n'empêche encore de pousser du code rouge** : tant qu'aucune règle de protection de branche n'exige que la CI soit verte, elle informe sans bloquer.

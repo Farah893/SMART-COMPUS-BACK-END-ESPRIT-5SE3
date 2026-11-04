@@ -13,7 +13,8 @@ Période : 3-4 novembre 2026. Les problèmes de *sécurité de l'application* (2
 | 3 | Dix branches « robot » et e-mails d'échec en rafale | Moyenne | Dependabot (config existante) | Résolu |
 | 4 | Un faux contrôle que j'avais écrit dans la CI du front | Moyenne | **Mon erreur** | Résolu (retiré) |
 | 5 | Phrase fausse dans `docs/CI.md` sur `pipefail` | Moyenne | **Mon erreur** | Corrigé |
-| 6 | Trivy trouve 6 vulnérabilités HIGH dans l'image (dans npm, livré avec Node) | Haute | Image de base | Correction poussée, **à confirmer par le run** |
+| 6 | Trivy trouve 6 vulnérabilités HIGH dans l'image (dans npm, livré avec Node) | Haute | Image de base | **Résolu et confirmé par la CI** |
+| 6b | Trivy `config` en erreur d'exécution, puis deux erreurs YAML dans mes modifications du workflow | Moyenne | **Mes erreurs** | Résolu, tests permanents ajoutés |
 | 7 | Scripts d'édition refusés par le shell (guillemets, heredoc) | Basse | Outil | Résolu |
 | 8 | Test « logout-all » qui semblait révéler une faille | Moyenne | Test mal posé | Résolu (comportement voulu) |
 | 9 | Deux tests unitaires en échec (égalité stricte, collision de matricules) | Basse | Tests | Résolu |
@@ -87,7 +88,11 @@ Période : 3-4 novembre 2026. Les problèmes de *sécurité de l'application* (2
 - **Cause** : ces paquets **ne sont pas dans l'application**. `npm ls --omit=dev` n'en montre aucun (et `npm audit` de production donne 0). Ils sont **dans npm lui-même** (et corepack), livré avec l'image `node:22-alpine`. Vérifié sur le npm de ce PC : `pacote`, `sigstore`, `brace-expansion`, `ip-address` y figurent. Le service ne lance jamais `npm` : son `CMD` est `node …` et sa sonde de santé utilise `wget`.
 - **Résolution** : plutôt que de « mettre à jour npm » (impossible : il fait partie de l'image épinglée), **retirer npm, npx, corepack et yarn de l'image finale** (`RUN rm -rf …` avant `USER node`). Double bénéfice : les 6 alertes disparaissent, et un attaquant qui obtiendrait un shell dans le conteneur ne peut plus installer d'outils.
 - **Pourquoi pas `.trivyignore`** : cela aurait fait taire l'alerte sans réduire le risque. Ici la **surface elle-même** est supprimée.
-- **Preuve attendue** : nouveau run GitHub, étape Trivy verte. *Si d'autres constats apparaissent (paquets du système Alpine), ils seront traités de la même façon : comprendre d'où ils viennent avant de choisir.*
+- **Preuve** : run GitHub suivant (`eb65915`) : l'étape « Analyse de l'image Docker (Trivy) » est **verte** ; aucun autre constat (paquets du système Alpine compris).
+- **Étape 6b, la suite** : dans ce même run, la 2ᵉ analyse (`trivy config`, Dockerfile) a échoué avec « erreur d'exécution » (pas un constat). Cause non lisible sans le journal ; options simplifiées (retrait de `--skip-dirs` et `--no-progress`, inutiles sur un dépôt fraîchement cloné) et vraie erreur de Trivy recopiée dans l'annotation. Pendant cette correction, **deux erreurs de syntaxe YAML de ma part** ont été attrapées par ma validation locale avant le push : (1) un `'
+'` d'un `tr` transformé en vrai retour à la ligne, (2) `run: docker logs svc || echo "… : …"` où le `:` suivi d'une espace est lu comme une clé YAML. Corrigés (`tr -s '[:space:]'`, bloc `run: |`).
+- **Résultat final** : run `4345f34` : `check` ✅, `docker` ✅ (build, Trivy image, Trivy Dockerfile, **test de fumée**) : première CI entièrement verte avec Trivy.
+- **Prévention** : trois tests permanents dans `test/security.test.ts` (YAML des workflows valide ; actions épinglées par SHA, permissions en lecture seule, `timeout-minutes` ; Dockerfile : digest, `--ignore-scripts`, npm retiré **avant** `USER node`). Preuve qu'ils peuvent échouer : en retirant volontairement un digest, le test passe au rouge. Un faux positif de mon propre test (le commentaire « AVANT `USER node` » trouvé à la place de l'instruction) a été corrigé en ciblant la ligne avec une expression régulière `^USER node$`.
 - **Leçon** : **un outil de sécurité en CI doit expliquer ses échecs**, sinon l'équipe finit par le désactiver. Et une alerte sur une dépendance qu'on n'utilise pas se règle en **retirant** la dépendance, pas en la masquant.
 
 ---
@@ -180,4 +185,4 @@ Période : 3-4 novembre 2026. Les problèmes de *sécurité de l'application* (2
 
 ## Mise à jour : suite de l'affaire Trivy
 
-Voir l'entrée 6. La correction (suppression de npm/corepack/yarn de l'image finale) est dans le commit qui suit `f113bf1` ; la confirmation vient du run GitHub suivant.
+**Terminé.** Voir les entrées 6 et 6b : CI backend entièrement verte (commit `4345f34`), avec Trivy sur l'image, Trivy sur le Dockerfile et le test de fumée du conteneur de production.
