@@ -174,6 +174,7 @@ Les commits portent uniquement le nom de leur auteur : pas de ligne `Co-Authored
 | Besoin | Fichier |
 |---|---|
 | **Sécurité : quoi, pourquoi, avec quel outil** | `docs/SECURITE.md` |
+| **La CI : comment elle est faite, pourquoi, comment la lire et la réparer** | `docs/CI.md` |
 | Comprendre le code de A à Z | `docs/GUIDE-INGENIEUR.md` |
 | Besoins, règles métier, critères d'acceptation | `docs/PRD.md` |
 | Architecture (système et code) | `docs/ARCHITECTURE.md` |
