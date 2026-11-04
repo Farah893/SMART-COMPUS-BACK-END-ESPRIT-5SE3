@@ -61,11 +61,14 @@ jobs:
           fi
           node .github/scripts/trivy-annotations.mjs trivy-image.json
       # Analyse du Dockerfile (mauvaises pratiques : utilisateur root, absence de HEALTHCHECK, etc.).
+      # Options minimales (le dépôt est fraîchement cloné : pas de node_modules à exclure). En cas d'erreur d'exécution,
+      # les dernières lignes de Trivy sont recopiées dans l'annotation pour que la cause soit lisible sans le journal.
       - name: Analyse de la configuration Docker (Trivy)
         run: |
           set -euo pipefail
-          if ! docker run --rm -v "$PWD":/w aquasec/trivy:0.57.1 config --severity HIGH,CRITICAL --no-progress --format json --output /w/trivy-config.json               --skip-dirs /w/node_modules --skip-dirs /w/dist /w; then
-            echo "::error title=Trivy::erreur d'exécution de Trivy config (ce n'est pas un constat)"; exit 1
+          if ! out=$(docker run --rm -v "$PWD":/w aquasec/trivy:0.57.1 config --severity HIGH,CRITICAL --format json --output /w/trivy-config.json /w 2>&1); then
+            echo "$out"
+            echo "::error title=Trivy config::erreur d'exécution : $(echo "$out" | tail -3 | tr -s '[:space:]' ' ' | cut -c1-250)"; exit 1
           fi
           node .github/scripts/trivy-annotations.mjs trivy-config.json
       # Test de fumée du conteneur réel : démarrage, base, amorçage, sondes, connexion de l'administrateur.
@@ -95,4 +98,5 @@ jobs:
             -d '{"email":"admin@smartcampus.tn","password":"Ci-Smoke-2026-Zq7!"}' | grep -q '"refreshToken"'
       - name: Logs du conteneur (en cas d'échec)
         if: failure()
-        run: docker logs svc
+        run: |
+          docker logs svc || echo "aucun conteneur svc, l'echec s'est produit avant son demarrage"

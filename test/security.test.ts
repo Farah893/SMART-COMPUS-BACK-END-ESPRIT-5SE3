@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
@@ -9,6 +11,7 @@ import { toUpdate } from "../src/modules/users/repositories/user.repository.js";
 import type { UserPatch } from "../src/modules/users/types/user.types.js";
 import { createJwksRouter } from "../src/modules/auth/routes/jwks.routes.js";
 import express from "express";
+import { parse as parseYaml } from "yaml";
 import { createRateLimiters } from "../src/shared/http/rate-limiters.js";
 
 /** Petit serveur de test branché sur les VRAIS limiteurs de l'application (en test, l'application les désactive). */
@@ -171,4 +174,45 @@ test("mises à jour de compte : seules les clés autorisées atteignent MongoDB 
   assert.deepEqual(Object.keys(update.$set).sort(), ["firstName", "phone", "role"]);
   assert.equal(({} as Record<string, unknown>).polluted, undefined, "aucune pollution de prototype");
   assert.deepEqual(toUpdate({ phone: undefined }), { $unset: { phone: "" } }, "undefined supprime toujours le champ");
+});
+
+/* ------------------------- Politique des workflows (chaîne de livraison) ------------------------- */
+
+const WORKFLOW_DIR = join(process.cwd(), ".github", "workflows");
+const workflows = readdirSync(WORKFLOW_DIR).filter((f) => f.endsWith(".yml"));
+
+test("workflows GitHub : YAML valide (une erreur de syntaxe ne se découvre sinon qu'après le push)", () => {
+  assert.ok(workflows.length >= 2, "ci.yml et codeql.yml attendus");
+  for (const f of workflows) assert.doesNotThrow(() => parseYaml(readFileSync(join(WORKFLOW_DIR, f), "utf8")), f);
+  assert.doesNotThrow(() => parseYaml(readFileSync("docker-compose.yml", "utf8")), "docker-compose.yml");
+});
+
+test("workflows GitHub : actions épinglées par SHA, lecture seule par défaut, durée maximale par travail", () => {
+  for (const f of workflows) {
+    const doc = parseYaml(readFileSync(join(WORKFLOW_DIR, f), "utf8")) as {
+      permissions?: Record<string, string>;
+      jobs: Record<string, { "timeout-minutes"?: number; steps: Array<{ uses?: string }> }>;
+    };
+    assert.deepEqual(doc.permissions, { contents: "read" }, `${f} : permissions par défaut = lecture seule`);
+    for (const [name, job] of Object.entries(doc.jobs)) {
+      assert.ok(job["timeout-minutes"], `${f}/${name} : timeout-minutes manquant`);
+      for (const step of job.steps) {
+        if (!step.uses) continue;
+        assert.match(step.uses, /@[0-9a-f]{40}\b/, `${f}/${name} : « ${step.uses} » doit être épinglée par SHA de commit (pas par étiquette)`);
+      }
+    }
+  }
+});
+
+test("Dockerfile : image de base épinglée par digest, scripts d'installation interdits, utilisateur non root, npm retiré de l'image finale", () => {
+  const dockerfile = readFileSync("Dockerfile", "utf8");
+  const from = dockerfile.split("\n").filter((l) => l.startsWith("FROM "));
+  assert.equal(from.length, 3);
+  for (const l of from) assert.match(l, /@sha256:[0-9a-f]{64}/, `FROM sans digest : ${l}`);
+  assert.equal(/npm ci(?![^\n]*--ignore-scripts)/.test(dockerfile), false, "npm ci sans --ignore-scripts");
+  const runtime = dockerfile.slice(dockerfile.lastIndexOf("AS runtime"));
+  assert.match(runtime, /rm -rf \/usr\/local\/lib\/node_modules\/npm/, "npm doit être retiré de l'image finale");
+  // `search` avec ^…$ cible l'INSTRUCTION `USER node`, pas le commentaire qui la mentionne.
+  assert.ok(runtime.indexOf("rm -rf /usr/local/lib/node_modules/npm") < runtime.search(/^USER node$/m), "la suppression doit précéder USER node");
+  assert.match(runtime, /^USER node$/m);
 });
