@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { generateKeyPairSync } from "node:crypto";
@@ -215,4 +216,40 @@ test("Dockerfile : image de base épinglée par digest, scripts d'installation i
   // `search` avec ^…$ cible l'INSTRUCTION `USER node`, pas le commentaire qui la mentionne.
   assert.ok(runtime.indexOf("rm -rf /usr/local/lib/node_modules/npm") < runtime.search(/^USER node$/m), "la suppression doit précéder USER node");
   assert.match(runtime, /^USER node$/m);
+});
+
+/* ----------- Alertes CodeQL : contournement par donnée utilisateur, course de fichiers, clé faible ----------- */
+
+test("aucune décision de sécurité n'est prise d'après l'adresse demandée (originalUrl) dans le garde d'authentification", () => {
+  const guard = readFileSync("src/modules/auth/middleware/auth.middleware.ts", "utf8");
+  const code = guard.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/**")).join("\n");
+  assert.equal(/originalUrl|req\.url|req\.path|req\.method/.test(code), false, "le garde ne doit lire ni l'URL ni la méthode fournies par le client");
+});
+
+test("generate-keys : création exclusive (aucune course entre « existe-t-il ? » et « écrire »), refus d'écraser, --force explicite", () => {
+  const dir = mkdtempSync(join(tmpdir(), "keys-"));
+  const run = (...args: string[]) =>
+    spawnSync(process.execPath, ["--import", "tsx", "src/scripts/generate-keys.ts", ...args], {
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, KEYS_DIR: dir }, encoding: "utf8", cwd: process.cwd(),
+    });
+  try {
+    const first = run();
+    assert.equal(first.status, 0, first.stderr);
+    const privateKey = readFileSync(join(dir, "jwt-private.pem"), "utf8");
+    assert.match(privateKey, /BEGIN PRIVATE KEY/);
+    if (process.platform !== "win32") assert.equal(statSync(join(dir, "jwt-private.pem")).mode & 0o777, 0o600, "droits 0600 dès la création");
+
+    // Une clé existante n'est JAMAIS écrasée sans --force, et le refus est net (code 1, message explicite).
+    writeFileSync(join(dir, "jwt-private.pem"), "CLE-EXISTANTE");
+    const second = run();
+    assert.equal(second.status, 1);
+    assert.match(second.stderr, /existe déjà/);
+    assert.equal(readFileSync(join(dir, "jwt-private.pem"), "utf8"), "CLE-EXISTANTE", "le fichier existant est intact");
+
+    const forced = run("--force");
+    assert.equal(forced.status, 0, forced.stderr);
+    assert.match(readFileSync(join(dir, "jwt-private.pem"), "utf8"), /BEGIN PRIVATE KEY/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

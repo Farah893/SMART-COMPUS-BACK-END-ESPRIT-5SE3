@@ -514,3 +514,54 @@ test("identifiant de requête : une valeur sobre du client est conservée, une v
   assert.notEqual(replaced, "x");
   assert.match(replaced ?? "", /^[0-9a-f-]{36}$/);
 });
+
+test("CSRF : un en-tête Authorization ou un jeton dans le corps ne contourne pas le contrôle quand NOS cookies sont présents", async () => {
+  const jar = new Map<string, string>();
+  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@smartcampus.tn", password: "Admin2026!" });
+  const bearer = await login("admin@smartcampus.tn", "Admin2026!");
+
+  // Avant : avec un Bearer valide, le jeton du cookie n'était pas utilisé, donc le contrôle CSRF était sauté.
+  const withBearer = await cookieCall("POST", "/auth/logout-all", jar, { Authorization: `Bearer ${bearer.body.token}` });
+  assert.equal(withBearer.status, 403);
+  assert.equal(withBearer.body.code, "CSRF_REJECTED");
+
+  // Avant : un jeton présent dans le corps faisait sauter le contrôle CSRF alors que le cookie de session était joint.
+  const bodyToken = await cookieCall("POST", "/auth/logout", jar, {}, { refreshToken: "x".repeat(40) });
+  assert.equal(bodyToken.status, 403);
+  assert.equal(bodyToken.body.code, "CSRF_REJECTED");
+  assert.ok(jar.has("sc_access"), "les cookies de la victime ne sont pas effacés par une requête CSRF");
+
+  // Un client sans cookies (autre service, script) n'est pas concerné : comportement historique inchangé.
+  assert.equal((await call("POST", "/auth/logout", { body: { refreshToken: "y".repeat(40) } })).status, 200);
+  assert.equal((await call("GET", "/users", { token: bearer.body.token })).status, 200);
+});
+
+test("mot de passe temporaire : la décision vient de la ROUTE (pas de l'URL) ; profil perso, mot de passe et déconnexion seulement", async () => {
+  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const created = await call("POST", "/users", {
+    token: admin.body.token, body: { firstName: "Tmp", lastName: "Three", email: "tmp3@smartcampus.tn", role: "admin" },
+  });
+  const session = await login("tmp3@smartcampus.tn", created.body.demoTemporaryPassword);
+  const id = session.body.user.id;
+  const t = session.body.token;
+
+  assert.equal((await call("GET", `/users/${id}`, { token: t })).status, 200, "son profil");
+  assert.equal((await call("GET", `/v1/users/${id}`, { token: t })).status, 200, "son profil, via /v1");
+  assert.equal((await call("GET", `/users/${admin.body.user.id}`, { token: t })).body.code, "PASSWORD_CHANGE_REQUIRED", "le profil d'un autre, même en étant administrateur : non");
+  // Variantes d'adresse qui trompaient un contrôle écrit sur l'URL. La route décide : un 200 n'est admis QUE pour une adresse
+  // qui désigne son propre profil (Express ignore la casse : /USERS/<id> est la même route), et il ne renvoie alors que lui.
+  const ownProfile = new RegExp(`^/+users/+${id}/*([?].*)?$`, "i") // Express fusionne les barres répétées;
+  for (const path of [`/users/${id}/`, `/USERS/${id}`, `/users//${id}`, `/users/${id}?x=1`, `/users/${id}/avatar`, `/users/${id}/login-history`, "/users", "/roles/permissions"]) {
+    const r = await call("GET", path, { token: t });
+    if (r.status === 200) {
+      assert.match(path, ownProfile, `${path} : un 200 n'est admis que pour son propre profil`);
+      assert.equal(r.body.id, id, `${path} ne doit donner que son propre profil`);
+    } else {
+      assert.ok([403, 404].includes(r.status), `${path} -> ${r.status}`);
+      if (r.status === 403) assert.equal(r.body.code, "PASSWORD_CHANGE_REQUIRED", `${path}`);
+    }
+  }
+  assert.equal((await call("PUT", `/users/${id}`, { token: t, body: { firstName: "X", lastName: "Y" } })).body.code, "PASSWORD_CHANGE_REQUIRED", "modifier son profil attend le changement de mot de passe");
+  assert.equal((await call("PUT", `/users/${id}/avatar`, { token: t, body: { avatarUrl: null } })).body.code, "PASSWORD_CHANGE_REQUIRED");
+  assert.equal((await call("POST", "/auth/logout-all", { token: t })).status, 200, "se déconnecter reste possible");
+});

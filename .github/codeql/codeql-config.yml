@@ -1,0 +1,6 @@
+name: SmartCampus CodeQL
+
+# Les tests ne sont pas livrés en production. Ils créent VOLONTAIREMENT des objets dangereux pour prouver que le service
+# les refuse (par exemple une clé RSA de 1024 bits : « Use of a weak cryptographic key »). On analyse tout le reste.
+paths-ignore:
+  - test

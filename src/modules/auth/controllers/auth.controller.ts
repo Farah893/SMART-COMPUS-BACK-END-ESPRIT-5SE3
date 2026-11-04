@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { AppError, unauthorized } from "../../../shared/errors/app-error.js";
 import {
-  assertCsrfSafe, clearAuthCookies, isCookieMode, readCookie, REFRESH_COOKIE, setAuthCookies,
+  assertCsrfSafe, clearAuthCookies, hasAuthCookie, isCookieMode, readCookie, REFRESH_COOKIE, setAuthCookies,
 } from "../../../shared/http/auth-cookies.js";
 import { dtoOf } from "../../../shared/middleware/validate.js";
 import { currentUser, requestContext } from "../../../shared/utils/request-context.js";
@@ -22,13 +22,14 @@ export class AuthController {
     return res.json(toSessionResponse(session));
   }
 
-  /** Jeton de rafraîchissement : corps d'abord (clients historiques), sinon cookie (alors protégé contre le CSRF). */
+  /**
+   * Jeton de rafraîchissement : corps d'abord (clients historiques), sinon cookie.
+   * Le contrôle CSRF s'applique dès que NOS cookies sont joints à la requête, quelle que soit la provenance du jeton :
+   * un appelant ne peut donc pas s'y soustraire en ajoutant un jeton dans le corps (condition qu'il contrôlerait).
+   */
   private refreshTokenOf(req: Request): string | undefined {
-    const fromBody = dtoOf<RefreshBody>(req).refreshToken;
-    if (fromBody) return fromBody;
-    const fromCookie = readCookie(req, REFRESH_COOKIE);
-    if (fromCookie) assertCsrfSafe(req);
-    return fromCookie;
+    if (hasAuthCookie(req)) assertCsrfSafe(req);
+    return dtoOf<RefreshBody>(req).refreshToken ?? readCookie(req, REFRESH_COOKIE);
   }
 
   login = async (req: Request, res: Response) => {

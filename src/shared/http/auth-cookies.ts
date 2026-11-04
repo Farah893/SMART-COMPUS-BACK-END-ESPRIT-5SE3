@@ -15,6 +15,10 @@ export const REFRESH_COOKIE = "sc_refresh";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+/** Le navigateur joint-il l'un de NOS cookies d'authentification ? (Il le fait tout seul, même depuis un site tiers.) */
+export const hasAuthCookie = (req: Request): boolean =>
+  readCookie(req, ACCESS_COOKIE) !== undefined || readCookie(req, REFRESH_COOKIE) !== undefined;
+
 export const isCookieMode = (req: Request): boolean => req.get(AUTH_MODE_HEADER) === "cookie";
 
 /** Lecture minimale de l'en-tête `Cookie` (pas de dépendance pour trois lignes). */

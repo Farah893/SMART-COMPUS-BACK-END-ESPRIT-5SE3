@@ -11,7 +11,7 @@ export function createAuthRouter({ authController: c, auth }: { authController: 
   router.post("/login", validate(loginDto), h(c.login));
   router.post("/refresh", validate(refreshDto), h(c.refresh));
   router.post("/logout", validate(refreshDto), h(c.logout));
-  router.post("/logout-all", auth.authenticate, h(c.logoutAll));
+  router.post("/logout-all", auth.authenticateAllowTemporary, h(c.logoutAll)); // un compte à mot de passe temporaire peut se déconnecter
   router.post("/register", validate(registerDto), h(c.register));
   router.post("/verify-email", validate(verifyEmailDto), h(c.verifyEmail));
   router.post("/resend-activation", validate(emailDto), h(c.resendActivation));

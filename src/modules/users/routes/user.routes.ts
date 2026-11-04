@@ -19,14 +19,19 @@ interface Deps {
 /** Monté sur /users — toutes les routes exigent un JWT valide. */
 export function createUserRouter({ userController: c, loginHistoryController: history, auth }: Deps): Router {
   const router = Router();
+
+  // SEULES routes ouvertes à un compte dont le mot de passe est encore temporaire (avec la déconnexion, dans le routeur d'auth) :
+  // lire SON profil et changer SON mot de passe. Le choix est fait ICI, route par route, jamais d'après l'adresse demandée.
+  router.get("/:id", auth.authenticateAllowTemporary, auth.ownProfileOnlyWhileTemporary, auth.selfOrAdmin, h(c.get));
+  router.put("/:id/password", auth.authenticateAllowTemporary, auth.onlySelf, validate(changePasswordDto), h(c.changePassword));
+
+  // Toutes les autres : comptes à mot de passe définitif uniquement.
   router.use(auth.authenticate);
 
   router.post("/", auth.requireAdmin, validate(adminCreateUserDto), h(c.create));
   router.get("/", auth.requireAdmin, validate(listUsersQueryDto, "query"), h(c.list));
 
-  router.get("/:id", auth.selfOrAdmin, h(c.get));
   router.put("/:id", auth.selfOrAdmin, validate(updateProfileDto), h(c.updateProfile));
-  router.put("/:id/password", auth.onlySelf, validate(changePasswordDto), h(c.changePassword));
   router.put("/:id/avatar", auth.onlySelf, validate(updateAvatarDto), h(c.updateAvatar));
   router.put("/:id/role", auth.requireAdmin, validate(changeRoleDto), h(c.changeRole));
   router.patch("/:id/status", auth.requireAdmin, validate(changeStatusDto), h(c.changeStatus));
