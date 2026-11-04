@@ -15,7 +15,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -40,7 +40,7 @@ jobs:
           --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t smartcampus-user-service .
       # Test de fumée du conteneur réel : démarrage, base, amorçage, sondes, connexion de l'administrateur.
       - name: Smoke test
