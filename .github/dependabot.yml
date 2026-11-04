@@ -1,17 +1,19 @@
+# Mises à jour automatiques de dépendances : DÉSACTIVÉES (open-pull-requests-limit: 0).
+# Pourquoi : Dependabot crée une branche + une pull request par dépendance, ce qui encombre le dépôt, et certaines
+# propositions sont des changements de version majeure qui cassent le code (ex. express-rate-limit 8, mongoose 9).
+# Le garde-fou reste actif : la CI échoue sur `npm audit --omit=dev` (vulnérabilité haute ou critique).
+# Pour réactiver : remplacer 0 par 5 (npm) et 2 (docker, github-actions), puis relire chaque PR et lancer `npm run check`.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
-    open-pull-requests-limit: 5
-    groups:
-      opentelemetry:
-        patterns: ["@opentelemetry/*"]
-      dev-tools:
-        dependency-type: development
+    open-pull-requests-limit: 0
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+    open-pull-requests-limit: 0
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    open-pull-requests-limit: 0
