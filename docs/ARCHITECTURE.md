@@ -24,30 +24,42 @@ Principes appliqués :
 
 En développement, la Gateway n'existe pas encore : le front appelle directement `http://localhost:4001` (CORS ouvert pour `http://localhost:5173`).
 
-## 2. Architecture interne du user-service
+## 2. Architecture interne du user-service (niveau code)
 
-Architecture en **couches**, simple et lisible :
+> **Deux niveaux à ne pas confondre.** La section 1 décrit le **système** : comment SmartCampus est découpé en services, qui possède quelles données, comment ils communiquent (microservices). Cette section décrit l'**intérieur d'un seul service** : comment son code est organisé. Chaque service d'un système de microservices peut avoir une structure interne différente.
+
+**Choix pour le user-service : architecture en couches (layered).** C'est un service de support (comptes, authentification, rôles) : ses règles métier sont limitées, une structure en couches simple suffit. Une architecture hexagonale / clean est réservée aux services au cœur métier riche (commandes, paiement, tarification…) : voir `docs/DECISIONS.md`, D2.
 
 ```
-HTTP ─► middleware (sécurité, auth) ─► routes (contrôleurs) ─► services (métier/infra) ─► models (MongoDB)
-                                                │
-                                                └─► utils (validation zod, hachage, JWT, erreurs)
+HTTP ─► routes ─► controller ─► service ─► repository ─► MongoDB
+          │           │            │
+          │           │            └─ règles métier (aucune dépendance à Express)
+          │           └─ HTTP seulement : DTO d'entrée → service → DTO de sortie
+          └─ chemins + middlewares (auth, validation zod)
 ```
 
-| Couche | Dossier | Rôle |
-|---|---|---|
-| Entrée | `app.js`, `server.js` | Assemblent Express, démarrent MongoDB, le seed, le bus, le serveur |
-| Middleware | `middleware/` | Authentification, droits, gestion centrale des erreurs |
-| Routes | `routes/` | Une route = une fonction de l'API du front ; valide, applique la règle, répond |
-| Services | `services/` | Matricules et historique, e-mails, événements, permissions |
-| Modèles | `models/index.js` | Schémas Mongoose (la « base de données ») |
-| Utilitaires | `utils/` | Validation, sécurité, erreurs |
+Organisation **par module métier** (`auth`, `users`, `roles`, `login-history`). Dans chaque module, **un dossier par type de fichier** : `routes/`, `controllers/`, `services/`, `repositories/`, `dto/`, `models/`, `types/` (et `middleware/` ou `constants/` quand le module en a besoin). Un fichier se trouve donc toujours au même endroit d'un module à l'autre.
 
-**Limite assumée** : les routes contiennent encore une partie de la logique métier. Si le service grossit, extraire un `UserService` (une classe par cas d'usage) et ajouter des tests unitaires.
+| Dossier | Rôle |
+|---|---|
+| `server.ts`, `app.ts`, `container.ts` | Démarrage ; assemblage Express ; câblage des dépendances (injection par constructeur) |
+| `config/` | Variables d'environnement, validées au démarrage (zod) |
+| `shared/` | Socle partagé : constantes, erreurs applicatives, ports (interfaces), middlewares (validation, erreurs), politiques de validation |
+| `infrastructure/` | Accès techniques : MongoDB, SMTP, RabbitMQ, bcrypt/JWT, logger (pino) |
+| `modules/<module>/` | Un dossier par type de fichier : `routes/` → `controllers/` → `services/` → `repositories/` ; `dto/` (entrée zod / sortie) ; `models/` ; `types/` |
+| `docs/openapi.ts` | Contrat OpenAPI généré depuis les DTO zod (`/docs`, `/openapi.json`) |
+| `modules/health/` | Sondes `/health` (vivacité) et `/ready` (dépendances) |
+
+Règles de dépendance :
+- Le **controller** ne contient aucune règle métier ; le **service** ne connaît ni Express ni Mongoose ; seul le **repository** parle à MongoDB et renvoie des objets simples (`lean`), jamais des documents Mongoose.
+- Les **erreurs** décrivent leur nature (`conflict`, `locked`…), pas un code HTTP : un seul tableau (`STATUS_BY_KIND`) les traduit en statut.
+- Le service dépend de petites interfaces (dépôts, hasher, mail, bus) injectées dans le constructeur : cela permet des tests unitaires sans base. C'est la seule concession à l'hexagonal ; on n'en ajoute pas davantage ici.
+
+**Exploitation (niveau système)** : `/health` et `/ready` pour l'orchestrateur, `x-request-id` propagé dans tous les logs JSON, arrêt propre sur SIGTERM, `Dockerfile` multi-étapes sans root, configuration uniquement par variables d'environnement, service sans état (le JWT est vérifié par chaque service avec le même secret).
 
 ## 3. Base de données MongoDB
 
-Base `smartcampus_users`, 5 collections :
+Base `smartcampus_users`, 7 collections :
 
 | Collection | Contenu | Points importants |
 |---|---|---|
@@ -56,87 +68,43 @@ Base `smartcampus_users`, 5 collections :
 | `permissions` | Une ligne par couple (rôle, permission) | Index unique `{role, key}` |
 | `tokens` | Codes de vérification et jetons de réinitialisation | Valeur **hachée** ; index TTL `expiresAt` : MongoDB supprime les expirés |
 | `counters` | Séquences par rôle | `findOneAndUpdate + $inc` : incrément atomique, donc pas de matricule en double |
+| `refreshtokens` | Jetons de rafraîchissement (sessions longues) | Valeur **hachée** (index unique) ; `familyId` (révocation par famille) ; `usedAt`/`revokedAt` ; index TTL `expiresAt` |
+| `outboxes` | Boîte d'envoi des événements de domaine | `eventId` unique ; `status` `pending`→`published` ; `lockedUntil` (bail), `nextAttemptAt` (backoff) ; index TTL `expiresAt` posé à la publication. Voir `docs/RABBITMQ-ET-EVENEMENTS.md` |
 
-## 4. Les fichiers importants, un par un
+Le compte porte aussi `tokensValidAfter` (facultatif) : les jetons d'accès émis avant cette date sont refusés (voir `docs/DECISIONS.md` D4).
 
-### `src/server.js`
-Point de démarrage : connecte MongoDB, exécute `seed()`, connecte RabbitMQ (optionnel), écoute sur le port. Sur SIGINT/SIGTERM, ferme le serveur puis MongoDB (arrêt propre).
+## 4. Les fichiers importants
 
-### `src/app.js`
-Construit l'application Express. Ordre voulu : `helmet` (en-têtes de sécurité) → `cors` (origines autorisées) → `express.json` (limite 1 Mo pour la photo) → `/health` → routeurs → 404 → gestionnaire d'erreurs.
-`trust proxy` : derrière la Gateway, `req.ip` donne la vraie IP du client (historique de connexion).
-Le `rateLimit` n'est appliqué qu'à `/auth` : limite la force brute (100 requêtes / 15 min / IP) en plus du verrouillage par compte.
+### Démarrage et assemblage
+- `src/server.ts` : crée **un seul** conteneur, connecte MongoDB, exécute `seed()`, connecte RabbitMQ (optionnel), écoute. Sur SIGINT/SIGTERM : arrêt propre (plus de nouvelles connexions, fermeture de la base, délai maximum 10 s).
+- `src/app.ts` : ordre voulu : documentation `/docs` → `helmet` → journalisation (id de requête) → `cors` → `express.json` (1 Mo) → sondes → routeurs → 404 → gestionnaire d'erreurs. `rateLimit` seulement sur `/auth`.
+- `src/container.ts` : **racine de composition**, le seul endroit qui connaît les implémentations concrètes (repositories → services → controllers).
+- `src/config/index.ts` : lit et **valide** l'environnement ; refuse de démarrer sur une valeur invalide ou avec le secret JWT par défaut en production.
 
-### `src/config.js`
-Lit toutes les variables d'environnement une seule fois. Refuse de démarrer en production avec le secret JWT par défaut.
+### Socle (`shared/`) et infrastructure
+- `shared/errors/app-error.ts` : `AppError(kind, message, details)` et fabriques (`conflict`, `locked`…).
+- `shared/middleware/error-handler.ts` : traduction nature → statut HTTP ; 500 sans fuite d'information (détail dans les logs avec l'id de requête).
+- `shared/middleware/validate.ts` : applique un schéma zod (DTO d'entrée), expose `req.dto` nettoyé. Un client ne peut pas s'inscrire comme admin : `registerDto` ne déclare pas `role`.
+- `infrastructure/security/` : bcrypt (coût 10), JWT (`sub`, `name`, `role`), mots de passe temporaires (`crypto.randomInt`), hachage SHA-256 des codes.
+- `infrastructure/mail/` : Nodemailer ; un échec d'envoi est journalisé et ne fait pas échouer la création du compte.
+- `infrastructure/messaging/event-bus.ts` : journalise toujours, publie sur RabbitMQ si connecté ; `status()` alimente `/ready`.
 
-### `src/utils/validation.js`
-Définit les schémas **zod** de chaque corps de requête et `parse()` qui renvoie un 422 `VALIDATION_ERROR`. Détail clé : `schemas.register` ne déclare pas `role` ; zod supprime les clés inconnues, donc **un client ne peut pas s'inscrire comme admin**. Contient aussi `isInstitutionalEmail` (domaine) et `isStrongPassword` (mêmes règles que le front).
+### Modules
+- `modules/auth` (`services/auth.service.ts`) : login (ordre voulu : inconnu 401 → suspendu 423 → inactif 403 → mauvais mot de passe, avec incrément **atomique** du compteur et suspension au seuil), inscription (toujours `student`), vérification d'e-mail, mot de passe oublié/réinitialisé (jetons hachés, usage unique, TTL). `middleware/auth.middleware.ts` relit le compte en base à chaque requête.
+- `modules/users` : création par un admin (mot de passe temporaire), liste filtrée + statistiques, profil, mot de passe, photo, rôle (publie `RôleModifié`), statut, suppression ; l'admin ne peut pas se retirer ses propres droits (`SELF_PROTECTED`). `dto/user.dto.ts` définit le JSON exposé (jamais `_id`, `passwordHash`, `emailVerified`).
+- `modules/roles` : catalogue de 13 permissions et matrice rôles × permissions ; les valeurs par défaut sont insérées avec `$setOnInsert` (les changements de l'admin ne sont pas écrasés au redémarrage).
+- `modules/login-history` : une ligne par tentative (IP, appareil déduit du User-Agent).
+- `bootstrap/seed.ts` et `scripts/` : données de départ idempotentes et outils CLI (`npm run seed`, `npm run set-role`).
 
-### `src/utils/security.js`
-- `hashPassword` / `verifyPassword` : bcrypt (coût 10).
-- `signToken` : JWT avec `sub` (matricule), `name`, `role` — le contrat attendu par le front et les autres services.
-- `generateTemporaryPassword` : 10 caractères sans lettres ambiguës (`0/O`, `1/l/I`), au moins une majuscule/minuscule/chiffre, tirage par `crypto.randomInt` (cryptographiquement sûr).
-- `sha256`, `randomToken`, `randomCode` : pour les codes et liens à usage unique.
-
-### `src/utils/errors.js`
-`HttpError(status, message, extra)` et les fabriques `unauthorized`, `forbidden`, `conflict`… `wrap()` envoie les erreurs des handlers async à Express (sans lui, une promesse rejetée planterait la requête).
-
-### `src/middleware/auth.js`
-- `authenticate` : extrait `Bearer`, vérifie la signature, puis **relit le compte** en base. Un compte supprimé/désactivé/suspendu est refusé (401) même avec un jeton encore valide. `req.user` contient le compte à jour.
-- `requireAdmin` : 403 si le rôle (relu en base) n'est pas `admin`.
-- `selfOrAdmin` : autorise l'admin ou le propriétaire de la ressource (`:id` = matricule du jeton).
-
-### `src/middleware/error.js`
-Un seul endroit transforme les erreurs en `{message, code, …}`. Convertit aussi l'erreur MongoDB `11000` (doublon d'e-mail, course entre deux inscriptions simultanées) en 409.
-
-### `src/models/index.js`
-Schémas Mongoose. Le `toJSON` du modèle `User` est la **frontière avec le front** : il renomme `_id` en `id`, convertit les dates en ISO, retire `passwordHash`, `__v`, `emailVerified`, et n'expose `mustChangePassword` que s'il est vrai. C'est ce qui garantit que le JSON correspond au type TypeScript `UserAccount`.
-
-### `src/routes/auth.js` (public)
-- **login** : ordre voulu — inconnu → 401 ; suspendu → 423 ; inactif → 403 ; mauvais mot de passe → compteur +1, historique, suspension à 5 (423) sinon 401 avec `failedAttempts` et `max` (le front affiche « il reste N essais »). Succès → compteur à 0, `lastLoginAt`, historique, JWT.
-- **register** : vérifie domaine, force du mot de passe, unicité ; crée **toujours un student** ; publie `UtilisateurCréé` ; envoie le code de vérification.
-- **verify-email / resend-activation** : compare le hash du code, supprime le jeton (usage unique).
-- **forgot-password** : répond toujours `{ok:true}` pour ne pas révéler quels e-mails existent ; n'envoie que si le compte existe et n'est pas désactivé.
-- **reset-password** : valide le jeton haché, change le mot de passe, lève `mustChangePassword`.
-
-### `src/routes/users.js` (JWT requis)
-Tout le routeur passe par `authenticate`.
-- `POST /` (admin) : génère le mot de passe temporaire, crée le compte avec `mustChangePassword`, publie `UtilisateurCréé`, envoie l'e-mail. `demoTemporaryPassword` n'est renvoyé que si `EXPOSE_TEMP_PASSWORD=true` (développement).
-- `GET /` (admin) : filtres `q` (regex **échappée**, insensible à la casse), `role`, `status` ; renvoie `{items, stats}` (stats calculées par agrégation sur tous les comptes, pas sur le résultat filtré).
-- `GET/PUT /:id` : soi-même ou admin.
-- `PUT /:id/password` : seulement soi-même ; vérifie l'actuel (401), différent (422), fort (422).
-- `PUT /:id/avatar` : seulement soi-même ; accepte `null` pour supprimer.
-- `PUT /:id/role` : admin ; publie `RôleModifié` seulement si le rôle change ; `notSelf` empêche l'auto-modification.
-- `PATCH /:id/status` : activer remet `failedAttempts` à 0 (déverrouille un compte suspendu).
-- `DELETE /:id` : 204 ; interdit sur soi-même.
-
-### `src/routes/roles.js` et `src/services/permissions.js`
-`PERMISSIONS` est le catalogue (12 permissions). `seedPermissions` insère les valeurs par défaut avec `$setOnInsert` : au redémarrage, **les modifications de l'admin ne sont pas écrasées**. `permissionMatrix` reconstruit `matrix[role][clé]` en initialisant tout à `false`.
-
-### `src/routes/history.js`
-`GET /login-history` : tous les événements (admin). Les événements d'un utilisateur sont dans `users.js`.
-
-### `src/services/accounts.js`
-`nextId(role)` : matricule atomique `PRÉFIXE-ANNÉE-NNNN`. `logLogin` : enregistre IP et appareil (déduit du User-Agent). `userStats` : agrégation par statut.
-
-### `src/services/mailer.js`
-Nodemailer. **Un échec d'envoi est journalisé mais ne fait pas échouer** la création du compte : l'admin peut toujours réinitialiser plus tard.
-
-### `src/services/events.js`
-`publishEvent(name, payload)` journalise toujours, et publie sur RabbitMQ (exchange topic, clé `user.<nom>`, message persistant) si connecté. Si le bus est absent ou tombe, le service continue de fonctionner.
-
-### `src/seed.js`
-Idempotent : permissions par défaut + **premier administrateur** s'il n'existe aucun admin (variables `FIRST_ADMIN_*`). Aucun écran ne crée le premier admin, comme l'exige le README du module.
-
-### `test/api.test.js`
-Démarre une MongoDB en mémoire, lance l'application sur un port libre et rejoue les parcours d'acceptation du PRD via HTTP réel.
+### Tests (`test/`)
+- Unitaires (sans base, avec doublures en mémoire) : `user.service`, `auth.service`, `platform` (erreurs, DTO, politiques).
+- Intégration (HTTP réel, MongoDB en mémoire) : `api.test.ts`, y compris `/ready`, OpenAPI et le contrat JSON.
 
 ## 5. Sécurité : résumé des choix
 
 | Risque | Parade |
 |---|---|
-| Mots de passe volés en base | bcrypt ; hash jamais exposé (`select:false` + `toJSON`) |
+| Mots de passe volés en base | bcrypt ; hash jamais exposé (`select:false` + DTO de sortie) |
 | Devinette de mot de passe | Verrouillage à 5 essais + rate limit sur `/auth` |
 | Énumération de comptes | `forgot-password` toujours OK ; message de connexion générique |
 | Élévation de privilège | Rôle d'inscription fixé côté serveur ; rôle relu en base à chaque requête |
@@ -150,5 +118,18 @@ Démarre une MongoDB en mémoire, lance l'application sur un port libre et rejou
 docker compose up -d mongo mailpit      # MongoDB :27017 · Mailpit SMTP :1025, interface :8025
 cp .env.example .env
 npm run dev                             # :4001
-npm test                                # 5 tests d'intégration (MongoDB en mémoire)
+npm run check                           # lint + typecheck + tests (unitaires et intégration)
+npm run build && npm start              # version compilée
+# Documentation interactive : http://localhost:4001/docs
 ```
+
+## 7. Briques de production (résumé)
+
+| Sujet | Où | Documentation détaillée |
+|---|---|---|
+| Sessions longues, révocation | `modules/auth/services/session.service.ts`, `auth.middleware.ts` | `docs/DECISIONS.md` D4 |
+| Événements fiables (outbox + relais) | `infrastructure/messaging/` | `docs/RABBITMQ-ET-EVENEMENTS.md` |
+| Versionnage `/v1`, pagination | `app.ts`, `modules/users/` | `docs/DECISIONS.md` D3 |
+| Logs, métriques, traces, sondes | `infrastructure/logging/`, `infrastructure/observability/`, `instrumentation.ts`, `modules/health/` | `docs/DEPANNAGE.md` |
+| Conteneur, CI, mises à jour | `Dockerfile`, `.github/` | `docs/GUIDE-CONSTRUCTION.md` étape 11 |
+| Fichier par fichier | — | `docs/REFERENCE-FICHIERS.md` |

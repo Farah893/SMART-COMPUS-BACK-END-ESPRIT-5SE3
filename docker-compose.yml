@@ -1,13 +1,49 @@
+# ⚠️ DÉVELOPPEMENT UNIQUEMENT : MongoDB sans authentification, Mailpit qui affiche tous les e-mails (codes, liens) et RabbitMQ avec
+# l'identifiant par défaut. Tous les ports sont donc liés à 127.0.0.1 (jamais exposés au réseau). En production : bases et
+# courtier authentifiés, sur un réseau privé, derrière TLS.
+# Dépendances locales + le service lui-même (profil « full »).
+#   docker compose up -d                 -> mongo, mailpit, rabbitmq (puis `npm run dev` sur la machine)
+#   docker compose --profile full up -d  -> tout, y compris user-service en conteneur
 services:
   mongo:
     image: mongo:7
-    ports: ["27017:27017"]
+    ports: ["127.0.0.1:27017:27017"]
     volumes: ["mongo-data:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   mailpit:
     image: axllent/mailpit
-    ports: ["1025:1025", "8025:8025"]
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
   rabbitmq:
     image: rabbitmq:3-management
-    ports: ["5672:5672", "15672:15672"]
+    ports: ["127.0.0.1:5672:5672", "127.0.0.1:15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    profiles: ["full"]
+    build: .
+    ports: ["127.0.0.1:4001:4001"]
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/smartcampus_users
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?définir JWT_PRIVATE_KEY (clé RSA PEM encodée en base64 ; voir npm run keys:generate)}
+      FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:?définir FIRST_ADMIN_EMAIL}
+      FIRST_ADMIN_PASSWORD: ${FIRST_ADMIN_PASSWORD:?définir FIRST_ADMIN_PASSWORD (12 caractères minimum, différent de la valeur par défaut)}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false} # false seulement tant que le conteneur est servi en HTTP sur localhost
+      SMTP_HOST: mailpit
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    depends_on:
+      mongo: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
 volumes:
   mongo-data:

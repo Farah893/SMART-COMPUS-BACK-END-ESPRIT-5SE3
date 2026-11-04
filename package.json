@@ -3,18 +3,32 @@
   "version": "1.0.0",
   "description": "SmartCampus — microservice user-service (module Utilisateurs)",
   "type": "module",
-  "main": "src/server.js",
+  "main": "dist/server.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.6"
   },
   "scripts": {
-    "dev": "node --watch --env-file=.env src/server.js",
-    "start": "node --env-file=.env src/server.js",
-    "seed": "node --env-file=.env src/seed.js",
-    "set-role": "node --env-file=.env src/setRole.js",
-    "test": "node --test"
+    "dev": "node --env-file=.env --watch --import tsx --import ./src/instrumentation.ts src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file=.env --import ./dist/instrumentation.js dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "seed": "node --env-file=.env --import tsx src/scripts/seed.ts",
+    "keys:generate": "node --import tsx src/scripts/generate-keys.ts",
+    "set-role": "node --env-file=.env --import tsx src/scripts/set-role.ts",
+    "test": "node --import tsx --import ./test/setup.ts --test test/platform.test.ts test/user.service.test.ts test/auth.service.test.ts test/session.service.test.ts test/outbox.test.ts test/security.test.ts test/api.test.ts",
+    "lint": "eslint .",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "test:coverage": "node --import tsx --import ./test/setup.ts --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-exclude=\"src/instrumentation.ts\" --test-coverage-exclude=\"src/scripts/**\" --test-coverage-exclude=\"src/server.ts\" --test-coverage-exclude=\"src/docs/**\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=80 --test test/platform.test.ts test/user.service.test.ts test/auth.service.test.ts test/session.service.test.ts test/outbox.test.ts test/security.test.ts test/api.test.ts",
+    "audit:prod": "npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
+    "@opentelemetry/instrumentation-amqplib": "^0.71.0",
+    "@opentelemetry/instrumentation-express": "^0.72.0",
+    "@opentelemetry/instrumentation-http": "^0.300.0",
+    "@opentelemetry/instrumentation-mongodb": "^0.77.0",
+    "@opentelemetry/sdk-node": "^0.300.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.21.2",
@@ -22,14 +36,31 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
-    "morgan": "^1.10.0",
-    "nodemailer": "^6.9.16",
-    "zod": "^3.24.1"
+    "nodemailer": "^10.3.1",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "prom-client": "^15.1.3",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^4.6.7"
   },
   "optionalDependencies": {
     "amqplib": "^0.10.5"
   },
   "devDependencies": {
-    "mongodb-memory-server": "^11.3.0"
+    "@eslint/js": "^10.0.1",
+    "@types/amqplib": "^0.10.8",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.20.5",
+    "@types/nodemailer": "^8.0.2",
+    "@types/swagger-ui-express": "^4.1.8",
+    "eslint": "^10.14.0",
+    "mongodb-memory-server": "^11.3.0",
+    "pino-pretty": "^13.2.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.72.1"
   }
 }

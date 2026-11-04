@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.git
+.github
+docs
+test
+qc
+query
+*.md

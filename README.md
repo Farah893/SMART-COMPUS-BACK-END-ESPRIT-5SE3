@@ -1,7 +1,7 @@
 # SmartCampus — user-service
 
 Microservice du module **Utilisateurs** : authentification, comptes, rôles et permissions, historique de connexion.
-Node.js 20+ · Express · MongoDB (Mongoose) · JWT · zod · Nodemailer · RabbitMQ (optionnel).
+Node.js 20+ · **TypeScript (strict)** · Express · MongoDB (Mongoose) · JWT · zod · Nodemailer · RabbitMQ (optionnel).
 
 Le contrat d'API suit `src/features/users/README.md` du dépôt front.
 
@@ -49,11 +49,60 @@ Erreurs : `{ message, code?, … }` avec 401 · 403 · 404 · 409 `EMAIL_EXISTS`
 - Un admin ne peut pas supprimer, désactiver ni changer le rôle de son propre compte.
 - Événements publiés (RabbitMQ, exchange topic `smartcampus.events`, clés `user.UtilisateurCréé` / `user.RôleModifié`) si `RABBITMQ_URL` est défini ; sinon journalisés.
 
-## Organisation
+## Documentation
+
+| Je veux… | Lire |
+|---|---|
+| **Travailler en local** : installation, journée type, remises à zéro | `docs/TRAVAIL-EN-LOCAL.md` |
+| Comprendre **à quoi sert chaque fichier** | `docs/REFERENCE-FICHIERS.md` |
+| **Refaire le service seul**, étape par étape (et ajouter une route/un module/un événement) | `docs/GUIDE-CONSTRUCTION.md` |
+| Comprendre **RabbitMQ**, l'outbox et le relais en profondeur | `docs/RABBITMQ-ET-EVENEMENTS.md` |
+| Savoir **comment c'est testé** et utiliser les tests | `docs/TESTS-ET-VERIFICATION.md` |
+| **Dépanner** (méthode, incidents réels, pannes d'exploitation) | `docs/DEPANNAGE.md` |
+| Architecture et décisions | `docs/ARCHITECTURE.md`, `docs/DECISIONS.md` |
+| Contrat de l'API (interactif) | `http://localhost:4001/docs` |
+
+## Architecture
+
+**Système** : SmartCampus est un ensemble de microservices (voir `docs/ARCHITECTURE.md` §1). **Ce service** : architecture **en couches**, organisée par module métier, avec injection par constructeur (`src/container.ts`). Le découpage du système (microservices) et l'organisation du code (couches) sont deux niveaux distincts ; voir `docs/DECISIONS.md` D2.
 
 ```
-src/  app.js · server.js · seed.js · config.js
-      routes/ (auth, users, roles, history) · middleware/ (auth, error)
-      services/ (accounts, mailer, events, permissions) · models/ · utils/ (validation, security, errors)
-test/ api.test.js
+src/
+  server.ts · app.ts · container.ts      démarrage · assemblage Express · câblage des dépendances
+  config/                                variables d'environnement (lues et validées une seule fois)
+  shared/                                socle partagé par tous les modules
+    constants/ errors/ ports/ middleware/ validation/ utils/
+  infrastructure/                        accès techniques : database · mail (SMTP) · messaging (RabbitMQ) · security · logging
+  modules/                               UN DOSSIER PAR FONCTION MÉTIER, et dans chacun un dossier par type de fichier :
+    auth/ users/ roles/ login-history/ health/
+      routes/         chemins + middlewares        (user.routes.ts)
+      controllers/    couche HTTP                  (user.controller.ts)
+      services/       règles métier                (user.service.ts)
+      repositories/   accès MongoDB                (user.repository.ts)
+      dto/            DTO d'entrée (zod) et de sortie  (user.dto.ts)
+      models/         schémas Mongoose             (user.model.ts)
+      types/          types du domaine             (user.types.ts)
+      middleware/ · constants/                     selon le module (auth.middleware.ts, permission.catalog.ts)
+  docs/openapi.ts · bootstrap/seed.ts · scripts/ · types/express.d.ts
+test/             unitaires (service + doublures) et intégration (HTTP + MongoDB en mémoire)
 ```
+
+Règles de dépendance : `routes → controller → service → repository`. Le **controller** ne contient que du HTTP (DTO d'entrée → appel de service → DTO de sortie) ; le **service** porte les règles métier et ne dépend que d'**interfaces** (ports) ; le **repository** est le seul à connaître MongoDB. Les **DTO d'entrée** (zod, types inférés) valident et nettoient les requêtes ; les **DTO de sortie** définissent le JSON exposé (jamais le document Mongoose brut).
+
+## Commandes
+
+```
+npm run dev         # développement (tsx, rechargement automatique)
+npm run check       # lint + typecheck + tests
+npm run lint        # ESLint
+npm run typecheck   # tsc --noEmit (mode strict)
+npm run build       # compile vers dist/
+npm start           # lance dist/server.js
+npm test            # tests unitaires + intégration (47)
+npm run test:coverage  # idem + seuils de couverture
+npm run audit:prod  # vulnérabilités des dépendances de production
+npm run seed        # permissions par défaut + administrateur fixe
+npm run set-role -- adresse@gmail.com admin
+```
+
+Documentation interactive de l'API : `http://localhost:4001/docs` (contrat OpenAPI : `/openapi.json`). Sondes : `/health` (vivacité) et `/ready` (dépendances). Image Docker : `docker build -t smartcampus-user-service .`, ou `docker compose --profile full up -d`.

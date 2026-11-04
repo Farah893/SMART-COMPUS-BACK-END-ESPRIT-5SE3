@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      # Dépendances de production : la CI échoue sur une vulnérabilité haute ou critique.
+      - run: npm run audit:prod
+      # Tests unitaires + intégration (MongoDB en mémoire) avec seuils de couverture (lignes 90 %, branches 80 %, fonctions 80 %).
+      - run: npm run test:coverage
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: check
+    services:
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t smartcampus-user-service .
+      # Test de fumée du conteneur réel : démarrage, base, amorçage, sondes, connexion de l'administrateur.
+      - name: Smoke test
+        run: |
+          docker run -d --name svc --network host \
+            -e MONGODB_URI=mongodb://127.0.0.1:27017/smoke \
+            -e JWT_PRIVATE_KEY="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 | base64 -w0)" \
+            -e FIRST_ADMIN_EMAIL=admin@smartcampus.tn -e FIRST_ADMIN_PASSWORD='Ci-Smoke-2026-Zq7!' -e COOKIE_SECURE=false \
+            -e METRICS_TOKEN=ci-metrics-token \
+            smartcampus-user-service
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:4001/health && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:4001/ready
+          # Clés publiques de vérification : présentes, et aucune partie privée publiée.
+          curl -fsS http://127.0.0.1:4001/.well-known/jwks.json | grep -q '"kty":"RSA"'
+          ! curl -fsS http://127.0.0.1:4001/.well-known/jwks.json | grep -q '"d":'
+          # En production, la documentation de l'API n'est pas exposée.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4001/docs/)" = "404"
+          curl -fsS -H "Authorization: Bearer ci-metrics-token" http://127.0.0.1:4001/metrics | grep -q http_request_duration_seconds
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4001/metrics)" = "401"
+          curl -fsS -X POST http://127.0.0.1:4001/v1/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"admin@smartcampus.tn","password":"Ci-Smoke-2026-Zq7!"}' | grep -q '"refreshToken"'
+      - name: Logs du conteneur (en cas d'échec)
+        if: failure()
+        run: docker logs svc

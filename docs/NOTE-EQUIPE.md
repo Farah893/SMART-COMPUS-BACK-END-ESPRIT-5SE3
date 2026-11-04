@@ -5,7 +5,13 @@ Le **module Utilisateurs** est réel (Node.js + MongoDB). Les 5 autres modules s
 ## 1. Règles communes à tous les services
 
 1. **Un service = un dépôt = une base de données.** Ne lisez jamais la base d'un autre service.
-2. **Vérifiez le JWT** envoyé dans `Authorization: Bearer <jeton>` avec le **même `JWT_SECRET`** que le user-service (à échanger hors git). Le jeton contient `sub` (matricule), `name`, `role` (`student`, `teacher`, `admin`).
+2. **Vérifiez le JWT** envoyé dans `Authorization: Bearer <jeton>` avec la **clé publique** du user-service (RS256), publiée sur `GET <user-service>/.well-known/jwks.json` : **plus aucun secret à partager**. Choisissez la clé par le `kid` du jeton, mettez le JWKS en cache (5 min), **fixez l'algorithme** (`RS256`) et contrôlez `iss` (`smartcampus-user-service`), `aud` (`smartcampus`) et `exp`. Le jeton contient `sub` (matricule), `name`, `role` (`student`, `teacher`, `admin`). Exemple Node avec la bibliothèque `jose` :
+   ```ts
+   import { createRemoteJWKSet, jwtVerify } from "jose";
+   const jwks = createRemoteJWKSet(new URL(`${process.env.USER_SERVICE_URL}/.well-known/jwks.json`));
+   const { payload } = await jwtVerify(token, jwks, { algorithms: ["RS256"], issuer: "smartcampus-user-service", audience: "smartcampus" });
+   ```
+   *Transition en développement* : sans `JWT_PRIVATE_KEY`, le user-service signe encore en HS256 avec `JWT_SECRET` (JWKS vide). En production, RS256 est obligatoire. Le navigateur n'envoie plus d'en-tête `Authorization` (cookies `httpOnly`) : la Gateway doit lire le cookie `sc_access` et le transmettre en `Authorization: Bearer`, et écraser `X-Forwarded-For`.
 3. **Vérifiez le rôle vous-mêmes** : renvoyez 403 si le rôle n'a pas le droit. Ne vous fiez jamais au front.
 4. **Format d'erreur identique** : `{ "message": "...", "code": "...", ... }` avec les statuts du README de votre module (401, 403, 404, 409, 422). Le front lit `code` et `details`.
 5. **Routes et noms de champs exactement** comme dans le README de votre module (`src/features/<module>/README.md` du front). Si le contrat doit changer, modifiez le README ET prévenez le front.

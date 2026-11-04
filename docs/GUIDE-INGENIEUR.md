@@ -12,6 +12,7 @@ Dossier du projet : `C:\dev\SMART-COMPUS-ESPRIT-5SE3-USER-SERVICE`
 Node.js exécute du JavaScript **en dehors du navigateur**. Un serveur Node reste allumé, attend des demandes HTTP, et répond.
 - **Asynchrone** : lire une base ou envoyer un e-mail prend du temps. Node ne bloque pas : il utilise `async/await`. Dans le code, chaque `await` veut dire « attends ce résultat sans bloquer les autres utilisateurs ».
 - **Modules ES** (`import ... from`) : le `package.json` contient `"type": "module"`, donc chaque fichier importe ce dont il a besoin.
+- **TypeScript** : le code est écrit en TypeScript (types vérifiés par `npm run typecheck`, compilé vers `dist/` par `npm run build`). En développement, `tsx` exécute directement les fichiers `.ts`.
 - **npm** installe des bibliothèques (listées dans `package.json`, stockées dans `node_modules`).
 - Chaque bibliothèque a un rôle précis :
 
@@ -45,7 +46,7 @@ Les règles d'un vrai microservice, et comment elles sont appliquées ici :
 | Sans état (stateless) | Aucune session en mémoire : l'identité est dans le JWT, donc on peut lancer plusieurs copies |
 | Surveillable | `GET /health` indique si le service et sa base fonctionnent |
 
-**Comment les services se font confiance :** le user-service **signe** un JWT à la connexion avec `JWT_SECRET`. Les autres services **vérifient** ce jeton avec le même secret. Ils savent ainsi qui est l'utilisateur et son rôle, **sans jamais appeler** le user-service.
+**Comment les services se font confiance :** le user-service **signe** un JWT à la connexion avec sa **clé privée** (RS256 ; en développement seulement, un secret `JWT_SECRET` en HS256). Les autres services **vérifient** ce jeton avec la **clé publique** téléchargée sur `/.well-known/jwks.json` (aucun secret partagé). Ils savent ainsi qui est l'utilisateur et son rôle, **sans jamais appeler** le user-service.
 
 ### 1.3 MongoDB
 MongoDB est une base **orientée documents** : au lieu de tables et de lignes, on stocke des documents JSON dans des **collections**.
@@ -74,19 +75,22 @@ Où est stockée la base : MongoDB est installé sur le PC comme **service Windo
 Exemple : l'utilisateur clique sur **Se connecter**.
 
 ```
-1  Front        fetch POST http://localhost:4001/auth/login   {email, password}
-2  app.js       helmet · cors · lecture du JSON · rate limit
-3  routes/auth.js   → route POST /login
-4  utils/validation.js   zod vérifie le format → sinon 422
-5  models/index.js       User.findOne({ email })         ─► MongoDB
-6  routes/auth.js        compte inconnu ? suspendu ? désactivé ?
-7  utils/security.js     bcrypt compare le mot de passe
-8  services/accounts.js  enregistre la tentative (historique)
-9  utils/security.js     fabrique le JWT {sub, name, role}
-10 Réponse JSON  { token, user }  ─► Front
+1  Front            fetch POST http://localhost:4001/auth/login   {email, password}
+2  app.ts           helmet · journal (id de requête) · cors · lecture du JSON · rate limit
+3  auth.routes.ts   route POST /login
+4  validate.ts      le DTO d'entrée (zod, auth.dto.ts) vérifie le format → sinon 422
+5  auth.controller  passe le DTO et le contexte (IP, navigateur) au service
+6  auth.service     compte inconnu ? suspendu ? désactivé ?          (règles métier)
+7  user.repository  findByEmailWithPassword                          ─► MongoDB
+8  password hasher  bcrypt compare le mot de passe
+9  auth.service     échec : compteur +1 (atomique), suspension au seuil ; succès : remise à zéro
+10 login-history    enregistre la tentative (IP, appareil)
+11 token-service    fabrique le JWT {sub, name, role}
+12 auth.dto.ts      toLoginResponse : seul le JSON voulu sort
+   Réponse JSON  { token, user }  ─► Front
 ```
 
-Pour une route **protégée** (par exemple `GET /users`), une étape s'ajoute avant la route : `middleware/auth.js` lit l'en-tête `Authorization: Bearer <token>`, vérifie la signature, **relit le compte en base**, puis laisse passer ou répond 401/403.
+Pour une route **protégée** (par exemple `GET /users`), une étape s'ajoute avant la route : `middleware/auth.middleware.ts` lit l'en-tête `Authorization: Bearer <token>`, vérifie la signature, **relit le compte en base**, puis laisse passer ou répond 401/403.
 
 **Pourquoi relire le compte en base ?** Un JWT reste valide jusqu'à son expiration. Si on désactive un compte ou qu'on change un rôle, sans relecture le jeton continuerait à marcher. Avec la relecture, le changement est immédiat.
 
@@ -94,76 +98,75 @@ Pour une route **protégée** (par exemple `GET /users`), une étape s'ajoute av
 
 ## 3. Architecture du code
 
+> **Deux niveaux à ne pas confondre.** Les **microservices** décrivent comment on découpe le *système* (un service par métier, sa propre base, communication par API et événements : voir 1.2). L'**architecture en couches** décrit comment on organise le *code à l'intérieur d'un service*. Chaque service peut choisir sa propre structure interne : couches pour les services simples (comme celui-ci), hexagonal/clean pour les services au cœur métier riche (voir `docs/DECISIONS.md`, D2).
+
 ```
 SMART-COMPUS-ESPRIT-5SE3-USER-SERVICE/
-├─ .env                  configuration secrète (jamais dans git)
-├─ .env.example          modèle de configuration (dans git)
-├─ package.json          dépendances et commandes npm
-├─ docker-compose.yml    option : MongoDB/Mailpit par Docker (plus nécessaire)
+├─ .env / .env.example     configuration (le .env n'est jamais dans git)
+├─ package.json            dépendances et commandes (dev, build, check, test…)
+├─ tsconfig*.json          TypeScript strict (typecheck) et compilation vers dist/
+├─ Dockerfile · docker-compose.yml · .github/workflows/ci.yml
 ├─ src/
-│  ├─ server.js          POINT D'ENTRÉE : démarre tout
-│  ├─ app.js             assemble Express (sécurité + routes)
-│  ├─ config.js          lit le .env
-│  ├─ seed.js            données de départ (permissions, premier admin)
-│  ├─ setRole.js         outil : changer un rôle hors interface
-│  ├─ routes/            UNE ROUTE = UNE FONCTION DE L'API
-│  │   ├─ auth.js        connexion, inscription, mot de passe oublié…
-│  │   ├─ users.js       gestion des comptes, profil, photo
-│  │   ├─ roles.js       matrice rôles × permissions
-│  │   └─ history.js     historique de connexion global
-│  ├─ middleware/        code qui s'exécute AVANT les routes
-│  │   ├─ auth.js        vérifie le JWT et les droits
-│  │   └─ error.js       transforme toute erreur en réponse JSON
-│  ├─ services/          logique réutilisable
-│  │   ├─ accounts.js    matricules, historique, statistiques
-│  │   ├─ permissions.js catalogue des 13 permissions + matrice
-│  │   ├─ mailer.js      envoi des e-mails
-│  │   ├─ emailTemplates.js  design des e-mails
-│  │   └─ events.js      événements de domaine (RabbitMQ)
-│  ├─ models/index.js    schémas MongoDB
-│  └─ utils/             petites fonctions sans état
-│      ├─ validation.js  schémas zod, règles de mot de passe et de domaine
-│      ├─ security.js    bcrypt, JWT, mots de passe temporaires, hachages
-│      └─ errors.js      classe d'erreur HTTP
-├─ test/api.test.js      5 tests d'intégration
-└─ docs/                 PRD, ARCHITECTURE, DECISIONS, ce guide
+│  ├─ server.ts            POINT D'ENTRÉE : démarre tout, arrêt propre
+│  ├─ app.ts               assemble Express (sécurité, journal, routes, erreurs)
+│  ├─ container.ts         câble les couches (qui dépend de qui)
+│  ├─ config/              lit et valide le .env
+│  ├─ shared/              socle partagé : erreurs, ports, middlewares, validation, constantes
+│  ├─ infrastructure/      accès techniques : MongoDB, e-mail, RabbitMQ, bcrypt/JWT, logs
+│  ├─ modules/             UN DOSSIER PAR FONCTION MÉTIER, avec un sous-dossier par type de fichier
+│  │                        (routes/ controllers/ services/ repositories/ dto/ models/ types/)
+│  │   ├─ auth/            connexion, inscription, mot de passe oublié
+│  │   ├─ users/           comptes, profil, rôle, statut, photo
+│  │   ├─ roles/           matrice rôles × permissions
+│  │   ├─ login-history/   historique de connexion
+│  │   └─ health/          sondes /health et /ready
+│  ├─ docs/openapi.ts      contrat de l'API (page /docs)
+│  ├─ bootstrap/seed.ts    données de départ ; scripts/ : outils en ligne de commande
+│  └─ types/               types Express (req.user, req.dto)
+├─ test/                   tests unitaires (sans base) et d'intégration (HTTP + MongoDB en mémoire)
+└─ docs/                   PRD, ARCHITECTURE, DECISIONS, ce guide
 ```
 
-**Le principe des couches** : chaque couche ne parle qu'à la suivante.
-`routes` (reçoit/répond) → `services` (règle ou travail) → `models` (base).
-Les `middleware` filtrent avant les routes. Les `utils` sont des outils sans effet de bord.
+**Le principe des couches** (dans chaque module) : chaque couche ne parle qu'à la suivante.
+
+```
+routes ─► controller ─► service ─► repository ─► MongoDB
+ chemins    HTTP        règles      accès aux
+ + garde    seulement   métier      données
+```
+
+- **DTO d'entrée** (`dto/*.dto.ts`, zod) : valident et nettoient ce qui arrive. **DTO de sortie** : décident de ce qui sort (jamais le mot de passe haché ni `_id`).
+- Le **service** ne connaît ni Express ni MongoDB : il se teste sans base.
+- Les **erreurs** disent ce qui s'est passé (`conflict`, `locked`…) ; un seul endroit les traduit en code HTTP.
 
 ---
 
 ## 4. Chaque fichier expliqué
 
-### `src/server.js` (démarrage)
-```js
-await mongoose.connect(config.mongoUri);   // 1. se connecte à MongoDB
-await seed();                              // 2. crée permissions + premier admin
-await connectBus();                        // 3. RabbitMQ (ignoré si absent)
-createApp().listen(config.port, ...);      // 4. ouvre le port 4001
-```
-Il gère aussi l'arrêt propre (`SIGINT`, `SIGTERM`) : il ferme le serveur puis la base. Si MongoDB est injoignable, le programme s'arrête avec une erreur : c'est voulu, un service sans base ne sert à rien.
+La description détaillée, fichier par fichier, est dans **`docs/ARCHITECTURE.md` (section 4)** ; elle est tenue à jour avec le code. Repères pour s'orienter :
 
-### `src/app.js` (assemblage Express)
-Express fonctionne comme une **chaîne** : chaque `app.use(...)` est une étape que traverse toute requête, **dans l'ordre**.
-1. `helmet()` : en-têtes de sécurité.
-2. `cors(...)` : autorise le front à appeler l'API. En développement, tout `localhost:<port>` est accepté ; en production, seulement `CORS_ORIGINS`.
-3. `express.json({ limit: "1mb" })` : lit le corps JSON (1 Mo à cause de la photo de profil).
-4. `/health` : indique `UP` si MongoDB répond, sinon 503.
-5. `/auth` (avec `rateLimit`), `/users`, `/roles`, `/login-history` : les quatre routeurs.
-6. `notFoundHandler` puis `errorHandler` : toujours **en dernier**.
-
-### `src/config.js`
-Lit toutes les variables d'environnement au même endroit et fournit des valeurs par défaut. **Seul fichier** qui lit `process.env`. En production, refuse de démarrer avec le secret JWT par défaut.
+| Je cherche… | Fichier |
+|---|---|
+| Ce qui se passe au démarrage | `src/server.ts` |
+| L'ordre des protections HTTP | `src/app.ts` |
+| Qui dépend de qui | `src/container.ts` |
+| La connexion et ses règles (423, 403, compteur) | `src/modules/auth/services/auth.service.ts` |
+| Les règles sur les comptes (auto-protection de l'admin, matricules) | `src/modules/users/services/user.service.ts` |
+| Le JSON exposé au front | `src/modules/users/dto/user.dto.ts`, `src/modules/auth/dto/auth.dto.ts` |
+| Les droits (JWT, admin, soi-même) | `src/modules/auth/middleware/auth.middleware.ts` |
+| La traduction erreur → code HTTP | `src/shared/middleware/error-handler.ts` |
+| Les variables d'environnement | `src/config/index.ts` et `.env.example` |
+| Les permissions par défaut | `src/modules/roles/constants/permission.catalog.ts` |
+| Les e-mails | `src/infrastructure/mail/` |
+| Les événements RabbitMQ | `src/infrastructure/messaging/event-bus.ts` |
+| La documentation interactive | `http://localhost:4001/docs` |
 
 ### `.env` (configuration)
 | Variable | Rôle |
 |---|---|
 | `PORT` | Port du service (4001) |
 | `MONGODB_URI` | Adresse de la base |
-| `JWT_SECRET` | Clé qui signe les jetons (à garder secrète) |
+| `JWT_PRIVATE_KEY_FILE` / `JWT_SECRET` | Clé privée RSA qui signe les jetons en production (RS256, `npm run keys:generate`) / secret de développement (HS256). À garder secret |
 | `JWT_EXPIRES_IN` | Durée de vie du jeton (2h) |
 | `EMAIL_DOMAIN` | Domaine d'e-mail accepté (`gmail.com`) |
 | `MAX_LOGIN_ATTEMPTS` | Échecs avant verrouillage (5) |
@@ -174,87 +177,6 @@ Lit toutes les variables d'environnement au même endroit et fournit des valeurs
 | `EXPOSE_TEMP_PASSWORD` | Si `true`, renvoie le mot de passe temporaire dans la réponse (développement seulement) |
 
 Le `.env` contient des secrets : il est dans `.gitignore`. Chaque développeur crée le sien avec `.env.example`.
-
-### `src/models/index.js` (la base)
-Définit les 5 collections avec Mongoose.
-- **`User`** : `_id` = matricule ; `email` unique ; `role` ∈ student/teacher/admin ; `status` ∈ active/inactive/suspended ; `failedAttempts` ; `mustChangePassword` ; `passwordHash` (jamais lu par défaut).
-  - Son `toJSON` fait le **pont avec le front** : renomme `_id` en `id`, met les dates en ISO, supprime `passwordHash` et les champs internes. Ainsi le JSON correspond au type TypeScript `UserAccount` du front.
-- **`LoginEvent`** : une ligne par tentative de connexion (utilisateur, IP, appareil, succès).
-- **`Permission`** : une ligne par couple (rôle, permission) ; index unique `{role, key}`.
-- **`Token`** : codes de vérification et jetons de réinitialisation, stockés **hachés**, avec un index TTL qui les supprime à l'expiration.
-- **`Counter`** : compteur par rôle pour fabriquer les matricules.
-
-### `src/routes/auth.js` (public, sans JWT)
-- **`POST /login`** : suit un ordre précis pour des messages justes.
-  1. compte inconnu → 401 ;
-  2. suspendu → 423 `ACCOUNT_LOCKED` ;
-  3. désactivé → 403 ;
-  4. mauvais mot de passe → compteur d'échecs +1, historique, et suspension à 5 ;
-  5. succès → compteur à 0, `lastLoginAt`, JWT.
-  Les réponses 401/423 incluent `failedAttempts` et `max` : le front affiche « il reste N essais ».
-- **`POST /register`** : crée **toujours un étudiant**. Le rôle envoyé par le client est ignoré (zod supprime les champs inconnus). Publie `UtilisateurCréé` et envoie le code de vérification.
-- **`POST /verify-email`**, **`/resend-activation`** : code à 6 chiffres, 15 minutes.
-- **`POST /forgot-password`** : répond **toujours** « OK », même si le compte n'existe pas, pour ne pas révéler les comptes.
-- **`POST /reset-password`** : jeton à usage unique, valable 1 heure.
-
-### `src/routes/users.js` (JWT obligatoire)
-Tout le fichier commence par `usersRouter.use(authenticate)`.
-- **`POST /`** (admin) : crée un compte, génère un **mot de passe temporaire**, marque `mustChangePassword`, envoie l'e-mail, publie `UtilisateurCréé`.
-- **`GET /`** (admin) : filtres `q`, `role`, `status` ; renvoie `{items, stats}`.
-- **`GET /:id`, `PUT /:id`** : soi-même ou admin (profil).
-- **`PUT /:id/password`** : soi-même ; mauvais actuel → 401, identique → 422, faible → 422.
-- **`PUT /:id/avatar`** : soi-même ; la photo est une chaîne image encodée (ou `null`).
-- **`PUT /:id/role`** (admin) : publie `RôleModifié`.
-- **`PATCH /:id/status`** (admin) : activer remet les échecs à zéro (déverrouille).
-- **`DELETE /:id`** (admin).
-- **`GET /:id/login-history`** : soi-même ou admin.
-- L'admin ne peut ni se supprimer, ni se désactiver, ni changer son propre rôle (409 `SELF_PROTECTED`).
-
-### `src/routes/roles.js` et `src/services/permissions.js`
-`PERMISSIONS` est le catalogue des 13 droits (par exemple `academic.manage`, `library.manage`). La matrice rôle × permission est stockée en base. `seedPermissions` utilise `$setOnInsert` : au redémarrage, **il ajoute les droits manquants sans écraser les choix de l'admin**. Les droits `users.*` de l'admin sont verrouillés (403).
-
-### `src/routes/history.js`
-Historique de **tous** les comptes (admin). Filtre `?result=success|failure`.
-
-### `src/middleware/auth.js`
-- `authenticate` : extrait `Bearer <token>`, vérifie la signature, relit le compte, refuse si introuvable ou non actif. Place le compte dans `req.user`.
-- `requireAdmin` : 403 si le rôle n'est pas `admin`.
-- `selfOrAdmin` : autorise l'admin, ou la personne dont le matricule est dans l'URL.
-
-### `src/middleware/error.js`
-**Un seul endroit** transforme toute erreur en JSON `{ message, code, ... }`. Gère aussi les doublons MongoDB (code 11000 → 409) et les JSON invalides. Le front dépend de ce format.
-
-### `src/utils/validation.js`
-Contient les **schémas zod** de chaque requête, `parse()` (renvoie 422 avec le détail des champs), `isInstitutionalEmail` (domaine) et `isStrongPassword` (mêmes règles que le front). **Ne jamais faire confiance au front** : le backend revalide tout.
-
-### `src/utils/security.js`
-- `hashPassword`, `verifyPassword` : bcrypt. Le mot de passe n'est jamais stocké en clair.
-- `signToken` : JWT contenant `sub` (matricule), `name`, `role`.
-- `generateTemporaryPassword` : 10 caractères sans lettres ambiguës, tirage cryptographique.
-- `sha256`, `randomToken`, `randomCode` : pour les codes et liens à usage unique.
-
-### `src/utils/errors.js`
-Classe `HttpError(status, message, extra)` et des raccourcis (`unauthorized`, `forbidden`, `conflict`…). `wrap()` envoie les erreurs des fonctions `async` vers le gestionnaire d'erreurs.
-
-### `src/services/accounts.js`
-`nextId(role)` fabrique le matricule `ETU-2026-0001` avec un `$inc` atomique ; `logLogin` enregistre IP et appareil ; `userStats` compte les comptes par statut.
-
-### `src/services/mailer.js` et `emailTemplates.js`
-`emailTemplates.js` produit le HTML aux couleurs de SmartCampus (bleu `#1E3A8A`). `mailer.js` l'envoie via Gmail. **Un échec d'envoi est journalisé mais n'empêche pas** de créer le compte.
-
-### `src/services/events.js`
-Publie `UtilisateurCréé` et `RôleModifié`. Toujours écrits dans le terminal, et envoyés à RabbitMQ s'il est configuré. Permet aux autres services de réagir **sans que le user-service les connaisse**.
-
-### `src/seed.js`
-Au démarrage : construit les index, crée les permissions par défaut, crée le premier admin s'il n'y en a aucun. **Idempotent** : on peut le relancer sans danger.
-
-### `src/setRole.js`
-Outil en ligne de commande : `npm run set-role -- email@gmail.com admin`. Sert pour le premier administrateur ou en dépannage.
-
-### `test/api.test.js`
-Lance MongoDB en mémoire et rejoue les parcours : création d'un enseignant, droits, inscription, verrouillage, rôles. Chaque scénario correspond à un critère d'acceptation du PRD. Commande : `npm test`.
-
----
 
 ## 5. Comment le backend et le front sont connectés
 
@@ -293,7 +215,7 @@ Le contrat (noms de champs, codes d'erreur) est dans `src/features/users/README.
 1. `POST /auth/login` → le backend renvoie `{ token, user }`.
 2. Le front garde le jeton dans `localStorage` (`smartcampus.jwt`) et le profil dans la session.
 3. Chaque requête suivante envoie `Authorization: Bearer <jeton>`.
-4. Le backend vérifie la signature avec `JWT_SECRET`, relit le compte, applique les droits.
+4. Le backend vérifie la signature (clé publique en RS256, secret en développement), relit le compte, applique les droits.
 
 ### 5.4 Le contrat d'erreur (ce qui fait fonctionner l'interface)
 Le backend renvoie toujours `{ message, code, ... }`. Le front lit directement ces champs :
@@ -303,7 +225,7 @@ Le backend renvoie toujours `{ message, code, ... }`. Le front lit directement c
 - 401 `WRONG_PASSWORD`, 422 `SAME_PASSWORD` → erreur sur le bon champ.
 
 ### 5.5 CORS
-Le front (5173) et le backend (4001) sont deux « origines » différentes : le navigateur bloque la réponse par sécurité, sauf si le backend l'autorise explicitement. C'est le rôle de `cors(...)` dans `app.js`. En développement, il accepte tout `localhost` ; en production, uniquement `CORS_ORIGINS`.
+Le front (5173) et le backend (4001) sont deux « origines » différentes : le navigateur bloque la réponse par sécurité, sauf si le backend l'autorise explicitement. C'est le rôle de `cors(...)` dans `app.ts`. En développement, il accepte tout `localhost` ; en production, uniquement `CORS_ORIGINS`.
 
 ### 5.6 Corrections faites pour que cela fonctionne
 | Problème | Fichier du front | Correction |
@@ -336,7 +258,7 @@ Prérequis : le service Windows **MongoDB** doit tourner (port 27017).
 ## 7. Ce qu'un ingénieur doit pouvoir expliquer
 
 1. **Pourquoi un microservice** : un métier, une base, un déploiement indépendant.
-2. **Le trajet d'une requête** : `app.js` → middleware → route → validation → modèle → réponse (partie 2).
+2. **Le trajet d'une requête** : `app.ts` → middleware → route → validation → controller → service → repository → réponse (partie 2).
 3. **Le rôle du JWT** : l'identité voyage avec la requête ; le backend le signe, les autres services le vérifient. Et pourquoi on relit le compte en base.
 4. **Pourquoi bcrypt et pas un chiffrement** : le hachage est à sens unique ; même la base volée ne livre pas les mots de passe.
 5. **Pourquoi valider côté backend** : le front peut être contourné.

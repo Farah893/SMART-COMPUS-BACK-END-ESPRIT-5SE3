@@ -31,6 +31,22 @@ Après modification, relancer `npm run dev` des deux côtés.
 3. À chaque appel suivant, l'intercepteur ajoute `Authorization: Bearer <token>`. Le back vérifie la signature, relit le compte et en déduit le rôle.
 4. Si `user.mustChangePassword` est vrai, le front redirige vers `/changer-mot-de-passe`.
 
+### Session par cookies `httpOnly` (depuis le 4 novembre 2026)
+Le front envoie `X-Auth-Mode: cookie` et `credentials: "include"` sur chaque appel réel. Dans ce mode :
+- `POST /auth/login` et `POST /auth/refresh` posent deux cookies `httpOnly` (`sc_access`, `sc_refresh`, `Path=/`, `SameSite=Strict` par défaut, `Secure` en production) et **ne renvoient aucun jeton dans le corps** (seulement `{ user }`). Le JavaScript de la page ne voit donc jamais les jetons : une faille XSS ne peut plus les voler.
+- Le refresh tourne à chaque usage (rejeu détecté = famille révoquée, cookies effacés) ; `logout` et `logout-all` effacent les cookies.
+- **Protection CSRF** : toute requête qui modifie des données et qui est authentifiée *par cookie* doit porter `X-Auth-Mode: cookie` et, si le navigateur envoie `Origin`, une origine de `CORS_ORIGINS` (sinon 403 `CSRF_REJECTED`). Les clients `Authorization: Bearer` ne sont pas concernés.
+- **Sans l'en-tête `X-Auth-Mode`, rien ne change** : JWT dans le corps, `Authorization: Bearer` (autres services, Swagger, scripts, mode mock).
+- Réglages : `COOKIE_SAMESITE`, `COOKIE_DOMAIN`, `COOKIE_SECURE` (voir `.env.example`). Le front et l'API doivent être sur le **même site** (même domaine enregistrable) pour `SameSite=Strict`.
+- **Conséquence pour la Gateway et les autres services** : le navigateur n'envoie plus d'en-tête `Authorization`. La Gateway doit soit lire le cookie `sc_access` et le transmettre en `Authorization: Bearer`, soit les services doivent accepter ce cookie. À décider avec l'API Gateway.
+
+### Réponses de connexion durcies (4 novembre 2026)
+- `POST /auth/login` renvoie le **même 401** (`INVALID_CREDENTIALS`, sans `failedAttempts`) pour un mauvais mot de passe, un e-mail inconnu, un compte verrouillé ou désactivé. Le compteur « essais restants » n'existe donc plus dans l'écran de connexion.
+- Avec le **bon** mot de passe : `423 ACCOUNT_LOCKED` (+ `lockedUntil`, le verrouillage dure 15 min puis se lève seul), `403 ACCOUNT_INACTIVE`, `403 EMAIL_NOT_VERIFIED` (saisir le code reçu par e-mail).
+- Un compte avec mot de passe temporaire reçoit `403 PASSWORD_CHANGE_REQUIRED` partout sauf pour changer son mot de passe, lire son profil et se déconnecter.
+- Photos : image `data:` (JPEG/PNG/WebP, ~100 Ko) uniquement ; `GET /users` ne renvoie plus `avatarUrl` (utiliser `GET /users/:id`).
+- Un build de production du front parle au vrai service par défaut (le mode démo n'est actif que si `VITE_USE_MOCKS=true` hors production).
+
 ### Erreurs : le contrat qui fait fonctionner l'UI
 Le client met le **corps JSON de l'erreur dans `ApiError.details`**. Le front lit directement :
 
@@ -47,7 +63,7 @@ Le client met le **corps JSON de l'erreur dans `ApiError.details`**. Le front li
 C'est pourquoi le back renvoie toujours `{ message, code, … }`.
 
 ### Forme des données
-`UserAccount` (TypeScript) = JSON renvoyé par `User.toJSON()` : `id` (matricule), `firstName`, `lastName`, `email`, `role`, `status`, `failedAttempts`, `createdAt`, `lastLoginAt`, et optionnellement `phone`, `avatarUrl`, `mustChangePassword`. Les dates sont en ISO 8601.
+`UserAccount` (TypeScript) = JSON renvoyé par le DTO de sortie `toUserResponse` (`src/modules/users/dto/user.dto.ts`) : `id` (matricule), `firstName`, `lastName`, `email`, `role`, `status`, `failedAttempts`, `createdAt`, `lastLoginAt`, et optionnellement `phone`, `avatarUrl`, `mustChangePassword`. Les dates sont en ISO 8601.
 
 ## 4. Modifications faites dans le front pour le brancher
 
@@ -64,7 +80,7 @@ Contre une vraie MongoDB (Docker) et le service lancé :
 - Connexion admin, création d'un enseignant (matricule `ENS-2026-0001`), e-mail reçu dans Mailpit.
 - `GET /users?role=teacher&q=karim` filtre côté serveur ; `GET /login-history?result=success` fonctionne ; sans jeton → 401.
 - `npm run typecheck` du front passe.
-- 5 tests d'intégration du back passent.
+- Les 47 tests du back passent (dont les 5 tests d'intégration d'origine, dont les assertions n'ont jamais été modifiées).
 
 **Non vérifié** : parcours complet dans le navigateur (clics sur les écrans), RabbitMQ, API Gateway.
 

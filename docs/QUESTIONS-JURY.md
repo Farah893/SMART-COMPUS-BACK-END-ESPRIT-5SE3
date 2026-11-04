@@ -11,7 +11,7 @@ Pour les détails techniques, voir `GUIDE-INGENIEUR.md`.
 > « J'ai réalisé le **user-service**, le microservice du module Utilisateurs de SmartCampus. Il est écrit en **Node.js avec Express** et utilise **MongoDB** comme base de données.
 > Il gère l'**authentification** (connexion, inscription, mot de passe oublié), les **comptes** (l'administrateur crée des enseignants avec un mot de passe temporaire envoyé par e-mail), les **rôles et permissions**, et l'**historique de connexion**.
 > Il fournit un **JWT** qui contient l'identité et le rôle, que les autres services pourront vérifier sans m'appeler.
-> Il est connecté au front React par une API REST en JSON. J'ai testé le tout avec 5 tests d'intégration et avec la vraie base. Les autres modules, développés par mes camarades, sont encore en données fictives et seront branchés un par un. »
+> Il est connecté au front React par une API REST en JSON. J'ai testé le tout avec 47 tests automatiques (unitaires et d'intégration, 95 % de couverture), avec la vraie base, avec un vrai conteneur Docker et avec un vrai RabbitMQ. Les autres modules, développés par mes camarades, sont encore en données fictives et seront branchés un par un. »
 
 ---
 
@@ -124,7 +124,7 @@ Non, ils utilisent encore des **données fictives**. Seul le module Utilisateurs
 ## F. Questions sur la qualité et le travail réalisé
 
 **31. Comment avez-vous testé ?**
-Avec **5 tests d'intégration** (`npm test`) sur une MongoDB en mémoire : création d'un enseignant avec mot de passe temporaire, droits par rôle, inscription publique, verrouillage après 5 échecs avec réactivation, protection de l'admin et matrice de permissions. J'ai aussi testé en conditions réelles : vraie base, vrais e-mails Gmail, et préflight CORS. **Limite :** je n'ai pas de tests unitaires ni de tests automatiques de l'interface.
+Sur plusieurs niveaux (détail : `docs/TESTS-ET-VERIFICATION.md`). **Tests d'intégration** sur une MongoDB en mémoire : création d'un enseignant avec mot de passe temporaire, droits par rôle, inscription publique, verrouillage après 5 échecs avec réactivation, protection de l'admin, matrice de permissions, sessions (rotation et rejeu), pagination, versionnage, métriques. **Tests unitaires** de la couche métier avec des doublures en mémoire (sans base). **Scénarios réels** avec Docker : conteneur, arrêt progressif, et panne puis reprise de RabbitMQ sans perte d'événement (`npm run check` lance l'ensemble ; 47 tests). J'ai aussi testé en conditions réelles : vraie base, vrais e-mails Gmail, et préflight CORS. **Limite :** je n'ai pas de tests automatiques de l'interface (front).
 
 **32. Comment sont envoyés les e-mails ?**
 Avec Nodemailer via un compte Gmail (mot de passe d'application). Les e-mails sont en HTML aux couleurs de SmartCampus. Si l'envoi échoue, le compte est quand même créé et l'erreur est journalisée.
