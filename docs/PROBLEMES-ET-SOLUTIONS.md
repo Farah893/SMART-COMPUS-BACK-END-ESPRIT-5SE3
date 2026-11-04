@@ -29,6 +29,9 @@ Période : 3-4 novembre 2026. Les problèmes de *sécurité de l'application* (2
 | 18 | Attendre la CI : `sleep` bloqué | Basse | Outil | Contourné (moniteur) |
 | 19 | Avertissements de fins de ligne (LF/CRLF) à chaque `git add` | Basse | Windows + git | **Non résolu** |
 | 20 | Avertissement GitHub : actions en Node 20 obsolète | Basse | Plateforme | **À suivre** |
+| 21 | Trois alertes CodeQL : clé faible, course de fichiers, contournement par donnée utilisateur | Haute | **Mon code** | Résolu, test prouvé sur ancien et nouveau code |
+| 22 | Quota de l'API GitHub épuisé (le suivi de la CI devient aveugle) | Basse | Mes interrogations trop fréquentes | Résolu |
+| 23 | Mes propres tests trop stricts ou mal écrits (casse des URL, doubles barres, échappement de regex) | Basse | **Mes tests** | Résolu |
 
 ---
 
@@ -170,6 +173,50 @@ Période : 3-4 novembre 2026. Les problèmes de *sécurité de l'application* (2
 
 ---
 
+## D. Alertes CodeQL et tests
+
+### 21. Trois alertes CodeQL (onglet Security → Code scanning)
+Tu m'as donné les trois intitulés ; je les ai rapprochés du code (sans voir les numéros de ligne, à confirmer sur la page des alertes).
+
+**21a. « Use of a weak cryptographic key »**
+- **Cause** : `test/security.test.ts` génère une clé RSA de **1024 bits** *exprès*, pour prouver que le service la refuse (`token-service.ts` exige 2048 bits minimum). CodeQL voit la création d'une clé faible, sans savoir que c'est un cas de test.
+- **Résolution** : `.github/codeql/codeql-config.yml` exclut `test/` de l'analyse (les tests ne sont pas livrés). La **vraie protection** (refus au démarrage d'une clé < 2048 bits) reste testée, et la clé générée par le script de production est de **3072 bits**.
+- **Pourquoi pas une suppression au cas par cas** : le dossier de tests crée volontairement des objets dangereux pour vérifier qu'ils sont refusés ; les analyser produirait du bruit permanent.
+
+**21b. « Potential file system race condition »**
+- **Cause (réelle, faible)** : `generate-keys.ts` faisait `existsSync(fichier)` **puis** `writeFileSync`. Entre les deux, un autre processus peut créer ou remplacer le fichier (TOCTOU, *time-of-check to time-of-use*) : la clé privée pourrait être écrite dans un fichier contrôlé par quelqu'un d'autre. Et les droits `0600` étaient posés **après** par `chmod` : un instant lisible par d'autres.
+- **Résolution** : création **exclusive** (`flag: "wx"`) : « refuser si le fichier existe » et « écrire » deviennent **une seule opération** du système ; droits `0600` posés **à la création**. `--force` reste explicite.
+- **Preuve** : test qui lance le vrai script dans un dossier temporaire : 1ʳᵉ exécution crée la clé ; 2ᵉ **refuse d'écraser** (code 1, fichier intact) ; 3ᵉ avec `--force` remplace.
+
+**21c. « User-controlled bypass of security checks »** (la plus intéressante)
+- **Cause** : deux endroits où un contrôle de sécurité dépendait d'une valeur que **l'appelant** choisit :
+  1. le contrôle CSRF était sauté si la requête portait un en-tête `Authorization` valide (le jeton du cookie n'était alors pas utilisé) ou un jeton de rafraîchissement **dans le corps** ;
+  2. l'accès d'un compte à mot de passe temporaire dépendait de l'**URL** (`originalUrl`) et de la méthode.
+- **Gravité réelle** : pas exploitable depuis un site tiers (un site tiers ne peut pas ajouter d'en-tête `Authorization` sans pré-vérification CORS). Mais la **logique** est fragile : la sécurité reposait sur « l'appelant ne fera pas de mélange », et CodeQL a raison de le signaler.
+- **Résolution** :
+  1. le contrôle CSRF s'applique **dès que nos cookies sont joints** à la requête (`hasAuthCookie`), quelle que soit la provenance du jeton : l'appelant ne peut plus s'y soustraire ;
+  2. l'ouverture aux comptes à mot de passe temporaire est décidée **par la route** (`authenticateAllowTemporary` sur `GET /users/:id`, `PUT /users/:id/password`, `POST /auth/logout-all`), plus jamais d'après l'adresse.
+- **Preuve (démontrée dans les deux sens)** : le test « CSRF : un en-tête Authorization ou un jeton dans le corps ne contourne pas… » **échoue sur l'ancien code** (`200 !== 403` : `logout-all` avec un Bearer valide et nos cookies passait sans en-tête CSRF) et **passe sur le nouveau**. J'ai remis temporairement l'ancien garde pour le prouver, puis restauré le code actuel.
+- **Garde-fou durable** : un test échoue si le garde d'authentification relit un jour l'URL ou la méthode de la requête.
+- **Conséquence assumée** : un client qui envoie **à la fois** nos cookies et un Bearer, sans l'en-tête `X-Auth-Mode`, reçoit 403 sur les requêtes qui modifient des données (cas rare : Swagger ouvert dans un navigateur déjà connecté au front). Les services et scripts, qui n'ont pas de cookies, ne sont pas concernés.
+
+**Leçon** : une alerte SAST est une **question** (« est-ce que ça peut être contourné ? »), pas un verdict. Ici la réponse « pas depuis un site tiers » n'a pas suffi : on a rendu la règle **indépendante de l'appelant**, ce qui est plus simple à raisonner et à tester.
+
+### 22. Quota de l'API GitHub épuisé
+- **Symptôme** : le moniteur de CI affichait « lecture-impossible ». `curl https://api.github.com/rate_limit` : **0 requête restante sur 60**, remise à zéro à 16:30.
+- **Cause** : l'API publique, **sans connexion**, limite à 60 requêtes par heure ; mes boucles de surveillance interrogeaient trop souvent (plusieurs requêtes par cycle).
+- **Résolution** : le moniteur lit d'abord `/rate_limit` (qui ne consomme pas le quota), **attend la remise à zéro** si moins de 4 requêtes restent, puis n'interroge qu'une fois par cycle.
+- **Leçon** : sans connexion, **chaque appel compte** ; mesurer le quota avant d'insister.
+
+### 23. Mes tests de contournement trop stricts
+- **Symptôme** : le nouveau test du mot de passe temporaire échouait sur `/USERS/<id>` puis sur `/users//<id>` (réponse 200 alors que mon test attendait un refus).
+- **Cause** : **Express ignore la casse des routes** (`/USERS/x` = `/users/x`) et **fusionne les barres répétées**. Ces URL désignent donc la même route, qui renvoie légitimement **son propre profil**. C'est mon test qui était faux, pas le code. (L'ancien contrôle écrit sur l'URL, lui, aurait *refusé* `/USERS/<id>` par hasard : preuve de plus que décider d'après l'URL est fragile.)
+- **Résolution** : test précisé : un 200 n'est admis que si l'adresse désigne **son propre profil** (expression régulière insensible à la casse et aux barres répétées) **et** si la réponse ne contient que lui ; sinon, 403/404 avec le bon code.
+- **Petit incident lié** : ESLint a refusé un `\?` inutile dans mon expression régulière (`no-useless-escape`) : `[?]` règle le problème.
+- **Leçon** : avant de conclure qu'un comportement est une faille, vérifier **ce que le framework fait réellement** de l'URL.
+
+---
+
 ## Les huit leçons à retenir
 
 1. **Reproduire en local avant de théoriser** (CI rouge → rejeu des commandes → cause en une minute).
@@ -182,6 +229,10 @@ Période : 3-4 novembre 2026. Les problèmes de *sécurité de l'application* (2
 8. **Écrire ce qu'on a appris** : ce fichier, `docs/CI.md`, `docs/SECURITE.md`, et la skill `security`.
 
 ---
+
+## Documents liés
+- `docs/DEVSECOPS.md` : chaque outil (quoi, pourquoi, comment, ce que ça a donné, limites) et ce qui manque encore.
+- `docs/SAST-ET-IMAGE-DOCKER.md` : le SAST, le tri des 27 alertes, Trivy et le durcissement du conteneur.
 
 ## Mise à jour : suite de l'affaire Trivy
 

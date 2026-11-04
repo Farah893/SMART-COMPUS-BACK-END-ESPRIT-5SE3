@@ -175,6 +175,9 @@ Les commits portent uniquement le nom de leur auteur : pas de ligne `Co-Authored
 |---|---|
 | **Sécurité : quoi, pourquoi, avec quel outil** | `docs/SECURITE.md` |
 | **La CI : comment elle est faite, pourquoi, comment la lire et la réparer** | `docs/CI.md` |
+| **DevSecOps : chaque outil, pourquoi, comment, ce qui manque** | `docs/DEVSECOPS.md` |
+| **SAST (CodeQL, ESLint) et analyse de l'image Docker (Trivy)** | `docs/SAST-ET-IMAGE-DOCKER.md` |
+| **Problèmes rencontrés et comment ils ont été résolus** | `docs/PROBLEMES-ET-SOLUTIONS.md` |
 | Comprendre le code de A à Z | `docs/GUIDE-INGENIEUR.md` |
 | Besoins, règles métier, critères d'acceptation | `docs/PRD.md` |
 | Architecture (système et code) | `docs/ARCHITECTURE.md` |
