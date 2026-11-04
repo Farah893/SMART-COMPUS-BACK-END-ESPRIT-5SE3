@@ -37,9 +37,9 @@ test("erreurs techniques : JSON invalide 400, trop gros 413, doublon Mongo 409, 
 });
 
 test("DTO d'inscription : le rôle envoyé par le client est supprimé, l'e-mail normalisé", () => {
-  const dto = registerDto.parse({ firstName: " Ali ", lastName: "B", email: " ALI@SmartCampus.tn ", password: "Passw0rdOK", role: "admin" });
+  const dto = registerDto.parse({ firstName: " Ali ", lastName: "B", email: " ALI@Gmail.com ", password: "Passw0rdOK", role: "admin" });
   assert.equal("role" in dto, false);
-  assert.equal(dto.email, "ali@smartcampus.tn");
+  assert.equal(dto.email, "ali@gmail.com");
   assert.equal(dto.firstName, "Ali");
 });
 
@@ -49,9 +49,9 @@ test("DTO de création : rôle limité à la liste ; filtres de liste invalides 
 });
 
 test("politiques : domaine institutionnel, mot de passe fort, échappement des regex de recherche", () => {
-  assert.equal(isInstitutionalEmail("a@smartcampus.tn"), true);
-  assert.equal(isInstitutionalEmail("a@smartcampus.tn.evil.com"), false);
-  assert.equal(isInstitutionalEmail("a@gmail.com"), false);
+  assert.equal(isInstitutionalEmail("a@gmail.com"), true);
+  assert.equal(isInstitutionalEmail("a@gmail.com.evil.com"), false);
+  assert.equal(isInstitutionalEmail("a@example.com"), false);
   assert.equal(isStrongPassword("Abcdefg1"), true);
   assert.equal(isStrongPassword("abcdefg1"), false);
   assert.equal(escapeRegExp("a.*b(c)"), "a\\.\\*b\\(c\\)");

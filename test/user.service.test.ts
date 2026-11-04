@@ -8,13 +8,13 @@ import { InMemoryUserRepository, fakeHasher, makeUser, noSessions, recordingBus,
  * Possible parce que le service ne dépend que d'interfaces (ports) injectées par le constructeur.
  */
 
-function setup(rows = [makeUser({ _id: "ADM-2026-0001", role: "admin", email: "admin@smartcampus.tn" })]) {
+function setup(rows = [makeUser({ _id: "ADM-2026-0001", role: "admin", email: "admin@gmail.com" })]) {
   const repo = new InMemoryUserRepository(rows);
   const bus = recordingBus();
   const mailer = silentMailer();
   const service = new UserService({
     userRepository: repo, passwordHasher: fakeHasher, mailer, eventBus: bus, sessionStore: noSessions,
-    config: { emailDomain: "smartcampus.tn", exposeTempPassword: false },
+    config: { emailDomain: "gmail.com", exposeTempPassword: false },
   });
   return { service, repo, bus, mailer, admin: rows[0]! };
 }
@@ -22,7 +22,7 @@ function setup(rows = [makeUser({ _id: "ADM-2026-0001", role: "admin", email: "a
 test("matricule : préfixe du rôle, année courante, séquence sur 4 chiffres", async () => {
   const { service } = setup();
   const user = await service.createAccount({
-    firstName: "A", lastName: "B", email: "a@smartcampus.tn", role: "teacher", passwordHash: "x",
+    firstName: "A", lastName: "B", email: "a@gmail.com", role: "teacher", passwordHash: "x",
   });
   assert.match(user._id, new RegExp(`^ENS-${new Date().getFullYear()}-0001$`));
 });
@@ -30,22 +30,22 @@ test("matricule : préfixe du rôle, année courante, séquence sur 4 chiffres",
 test("création par un admin : e-mail du domaine, mot de passe temporaire envoyé, événement publié", async () => {
   const { service, bus, mailer, admin } = setup();
   const { account, temporaryPassword } = await service.createByAdmin(
-    { firstName: "Karim", lastName: "T", email: "karim@smartcampus.tn", role: "teacher" }, admin,
+    { firstName: "Karim", lastName: "T", email: "karim@gmail.com", role: "teacher" }, admin,
   );
   assert.equal(account.mustChangePassword, true);
   assert.equal(temporaryPassword, undefined, "le mot de passe temporaire n'est exposé qu'avec EXPOSE_TEMP_PASSWORD");
-  assert.deepEqual(mailer.sent, ["temp:karim@smartcampus.tn"]);
+  assert.deepEqual(mailer.sent, ["temp:karim@gmail.com"]);
   assert.deepEqual(bus.events.map((e) => e.name), ["UtilisateurCréé"]);
 });
 
 test("le domaine e-mail est imposé et les doublons refusés", async () => {
   const { service, admin } = setup();
   await assert.rejects(
-    service.createByAdmin({ firstName: "X", lastName: "Y", email: "x@gmail.com", role: "teacher" }, admin),
+    service.createByAdmin({ firstName: "X", lastName: "Y", email: "x@example.com", role: "teacher" }, admin),
     { kind: "unprocessable", details: { code: "INVALID_DOMAIN" } },
   );
   await assert.rejects(
-    service.createByAdmin({ firstName: "X", lastName: "Y", email: "admin@smartcampus.tn", role: "teacher" }, admin),
+    service.createByAdmin({ firstName: "X", lastName: "Y", email: "admin@gmail.com", role: "teacher" }, admin),
     { kind: "conflict", details: { code: "EMAIL_EXISTS" } },
   );
 });
@@ -60,8 +60,8 @@ test("un administrateur ne peut ni changer son rôle, ni se désactiver, ni se s
 });
 
 test("changer le rôle d'un autre compte publie RôleModifié ; le même rôle ne publie rien", async () => {
-  const student = makeUser({ _id: "ETU-2026-0001", email: "e@smartcampus.tn" });
-  const { service, bus, admin } = setup([makeUser({ _id: "ADM-2026-0001", role: "admin", email: "admin@smartcampus.tn" }), student]);
+  const student = makeUser({ _id: "ETU-2026-0001", email: "e@gmail.com" });
+  const { service, bus, admin } = setup([makeUser({ _id: "ADM-2026-0001", role: "admin", email: "admin@gmail.com" }), student]);
 
   await service.changeRole(student._id, "student", admin);
   assert.equal(bus.events.length, 0);
@@ -73,7 +73,7 @@ test("changer le rôle d'un autre compte publie RôleModifié ; le même rôle n
 });
 
 test("activer un compte suspendu remet le compteur d'échecs à zéro", async () => {
-  const locked = makeUser({ _id: "ETU-2026-0002", email: "l@smartcampus.tn", status: "suspended", failedAttempts: 5 });
+  const locked = makeUser({ _id: "ETU-2026-0002", email: "l@gmail.com", status: "suspended", failedAttempts: 5 });
   const { service, admin } = setup([makeUser({ _id: "ADM-2026-0001", role: "admin" }), locked]);
   const updated = await service.changeStatus(locked._id, "active", admin);
   assert.equal(updated.status, "active");
@@ -99,13 +99,13 @@ test("supprimer le téléphone : une valeur vide retire le champ", async () => {
 });
 
 test("dernier administrateur actif : ni rétrogradé, ni désactivé, ni supprimé", async () => {
-  const lastAdmin = makeUser({ _id: "ADM-2026-0002", role: "admin", email: "a2@smartcampus.tn" });
-  const actor = makeUser({ _id: "ADM-2026-0001", role: "admin", status: "inactive", email: "a1@smartcampus.tn" }); // acteur déjà hors service (course)
+  const lastAdmin = makeUser({ _id: "ADM-2026-0002", role: "admin", email: "a2@gmail.com" });
+  const actor = makeUser({ _id: "ADM-2026-0001", role: "admin", status: "inactive", email: "a1@gmail.com" }); // acteur déjà hors service (course)
   const { service } = setup([actor, lastAdmin]);
   await assert.rejects(service.changeRole(lastAdmin._id, "student", actor), { details: { code: "LAST_ADMIN" } });
   await assert.rejects(service.changeStatus(lastAdmin._id, "inactive", actor), { details: { code: "LAST_ADMIN" } });
   await assert.rejects(service.remove(lastAdmin._id, actor), { details: { code: "LAST_ADMIN" } });
-  const second = makeUser({ _id: "ADM-2026-0003", role: "admin", email: "a3@smartcampus.tn" });
+  const second = makeUser({ _id: "ADM-2026-0003", role: "admin", email: "a3@gmail.com" });
   const ok = setup([lastAdmin, second]);
   await ok.service.changeRole(second._id, "student", lastAdmin); // deux admins actifs : permis
 });

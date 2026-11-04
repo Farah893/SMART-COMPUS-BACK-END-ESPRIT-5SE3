@@ -56,7 +56,7 @@ after(async () => {
 });
 
 test("flux complet : admin crée un enseignant, mot de passe temporaire, changement obligatoire", async () => {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   assert.equal(admin.status, 200);
   const { sub, role } = JSON.parse(Buffer.from(admin.body.token.split(".")[1], "base64url").toString());
   assert.equal(role, "admin");
@@ -64,7 +64,7 @@ test("flux complet : admin crée un enseignant, mot de passe temporaire, changem
 
   const created = await call("POST", "/users", {
     token: admin.body.token,
-    body: { firstName: "Karim", lastName: "Trabelsi", email: "karim@smartcampus.tn", role: "teacher" },
+    body: { firstName: "Karim", lastName: "Trabelsi", email: "karim@gmail.com", role: "teacher" },
   });
   assert.equal(created.status, 201);
   assert.equal(created.body.account.mustChangePassword, true);
@@ -73,11 +73,11 @@ test("flux complet : admin crée un enseignant, mot de passe temporaire, changem
 
   const dup = await call("POST", "/users", {
     token: admin.body.token,
-    body: { firstName: "K", lastName: "T", email: "karim@smartcampus.tn", role: "teacher" },
+    body: { firstName: "K", lastName: "T", email: "karim@gmail.com", role: "teacher" },
   });
   assert.equal(dup.status, 409);
 
-  const t = await login("karim@smartcampus.tn", temp);
+  const t = await login("karim@gmail.com", temp);
   assert.equal(t.body.user.mustChangePassword, true);
   const id = t.body.user.id;
 
@@ -89,11 +89,11 @@ test("flux complet : admin crée un enseignant, mot de passe temporaire, changem
   assert.equal(wrong.status, 401);
   const ok = await call("PUT", `/users/${id}/password`, { token: t.body.token, body: { current: temp, next: "Nouveau2026" } });
   assert.equal(ok.status, 200);
-  assert.equal((await login("karim@smartcampus.tn", "Nouveau2026")).body.user.mustChangePassword, undefined);
+  assert.equal((await login("karim@gmail.com", "Nouveau2026")).body.user.mustChangePassword, undefined);
 });
 
 test("droits : un enseignant ne liste pas les comptes ni ceux des autres", async () => {
-  const t = await login("karim@smartcampus.tn", "Nouveau2026");
+  const t = await login("karim@gmail.com", "Nouveau2026");
   assert.equal((await call("GET", "/users", { token: t.body.token })).status, 403);
   assert.equal((await call("GET", "/users/ADM-2026-0001", { token: t.body.token })).status, 403);
   assert.equal((await call("GET", `/users/${t.body.user.id}`, { token: t.body.token })).status, 200);
@@ -101,16 +101,16 @@ test("droits : un enseignant ne liste pas les comptes ni ceux des autres", async
 });
 
 test("inscription publique : toujours étudiant, domaine imposé, e-mail unique", async () => {
-  const body = { firstName: "Yasmine", lastName: "Ben Salah", email: "yasmine@smartcampus.tn", password: "Campus2026!", role: "admin" };
+  const body = { firstName: "Yasmine", lastName: "Ben Salah", email: "yasmine@gmail.com", password: "Campus2026!", role: "admin" };
   const r = await call("POST", "/auth/register", { body });
   assert.equal(r.status, 201);
   assert.equal(r.body.role, "student");
   assert.equal((await call("POST", "/auth/register", { body })).status, 409);
-  assert.equal((await call("POST", "/auth/register", { body: { ...body, email: "x@gmail.com" } })).status, 422);
+  assert.equal((await call("POST", "/auth/register", { body: { ...body, email: "x@example.com" } })).status, 422);
 });
 
 test("inscription : connexion refusée tant que l'e-mail n'est pas vérifié ; le code est limité à 5 essais", async () => {
-  const email = "yasmine@smartcampus.tn";
+  const email = "yasmine@gmail.com";
   const pending = await login(email, "Campus2026!");
   assert.equal(pending.status, 403);
   assert.equal(pending.body.code, "EMAIL_NOT_VERIFIED");
@@ -131,36 +131,36 @@ test("inscription : connexion refusée tant que l'e-mail n'est pas vérifié ; l
 });
 
 test("5 échecs : réponse 401 identique à un compte inconnu, verrouillage TEMPORAIRE, l'admin peut le lever", async () => {
-  const unknown = await login("inconnu@smartcampus.tn", "mauvais");
+  const unknown = await login("inconnu@gmail.com", "mauvais");
   assert.equal(unknown.status, 401);
   let r!: ApiResponse;
-  for (let i = 0; i < 5; i++) r = await login("yasmine@smartcampus.tn", "mauvais");
+  for (let i = 0; i < 5; i++) r = await login("yasmine@gmail.com", "mauvais");
   assert.equal(r.status, 401);
   assert.deepEqual(r.body, unknown.body, "aucune différence observable entre compte existant et inconnu");
 
-  const locked = await login("yasmine@smartcampus.tn", "Campus2026!");
+  const locked = await login("yasmine@gmail.com", "Campus2026!");
   assert.equal(locked.status, 423);
   assert.equal(locked.body.code, "ACCOUNT_LOCKED");
   assert.ok(new Date(locked.body.lockedUntil).getTime() > Date.now(), "date de fin de verrouillage communiquée au titulaire");
 
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   const list = await call("GET", "/users?status=suspended", { token: admin.body.token });
   assert.equal(list.body.items.length, 1);
   assert.equal(list.body.stats.suspended, 1);
   assert.equal(list.body.items[0].avatarUrl, undefined, "les listes ne transportent pas les photos");
   const id = list.body.items[0].id;
   assert.equal((await call("PATCH", `/users/${id}/status`, { token: admin.body.token, body: { status: "active" } })).status, 200);
-  assert.equal((await login("yasmine@smartcampus.tn", "Campus2026!")).status, 200);
+  assert.equal((await login("yasmine@gmail.com", "Campus2026!")).status, 200);
 
   const hist = await call("GET", `/users/${id}/login-history?result=failure`, { token: admin.body.token });
   assert.equal(hist.body.length, 6);
   assert.equal((await call("PATCH", `/users/${id}/status`, { token: admin.body.token, body: { status: "inactive" } })).status, 200);
-  assert.equal((await login("yasmine@smartcampus.tn", "mauvais")).status, 401, "compte désactivé + mauvais mot de passe : 401 générique");
-  assert.equal((await login("yasmine@smartcampus.tn", "Campus2026!")).status, 403);
+  assert.equal((await login("yasmine@gmail.com", "mauvais")).status, 401, "compte désactivé + mauvais mot de passe : 401 générique");
+  assert.equal((await login("yasmine@gmail.com", "Campus2026!")).status, 403);
 });
 
 test("rôles : changement, auto-protection de l'admin, matrice verrouillée", async () => {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   const self = admin.body.user.id;
   assert.equal((await call("PUT", `/users/${self}/role`, { token: admin.body.token, body: { role: "student" } })).status, 409);
   assert.equal((await call("DELETE", `/users/${self}`, { token: admin.body.token })).status, 409);
@@ -206,7 +206,7 @@ test("exploitation : /health, /ready (dépendances), identifiant de requête, Op
 });
 
 test("contrat JSON : le compte exposé ne contient jamais de champ interne", async () => {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   const me = await call("GET", `/users/${admin.body.user.id}`, { token: admin.body.token });
   assert.equal(me.status, 200);
   for (const hidden of ["_id", "__v", "passwordHash", "emailVerified", "updatedAt"]) {
@@ -217,8 +217,8 @@ test("contrat JSON : le compte exposé ne contient jamais de champ interne", asy
 });
 
 test("versionnage : /v1 et l'alias historique donnent exactement les mêmes réponses", async () => {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
-  const viaV1 = await call("POST", "/v1/auth/login", { body: { email: "admin@smartcampus.tn", password: "Admin2026!" } });
+  const admin = await login("admin@gmail.com", "Admin2026!");
+  const viaV1 = await call("POST", "/v1/auth/login", { body: { email: "admin@gmail.com", password: "Admin2026!" } });
   assert.equal(viaV1.status, 200);
   assert.equal(viaV1.body.user.id, admin.body.user.id);
 
@@ -232,7 +232,7 @@ test("versionnage : /v1 et l'alias historique donnent exactement les mêmes rép
 });
 
 test("pagination : sans paramètre, comportement historique ; avec page/limit, pages stables et sans chevauchement", async () => {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   const all = await call("GET", "/users", { token: admin.body.token });
   assert.equal(all.body.page, 1);
   assert.equal(all.body.limit, 500);
@@ -256,7 +256,7 @@ test("pagination : sans paramètre, comportement historique ; avec page/limit, p
 
 /** Crée un compte via l'admin et renvoie une session ouverte (mot de passe temporaire déjà remplacé). */
 async function openSession(email: string) {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   const created = await call("POST", "/users", {
     token: admin.body.token,
     body: { firstName: "Sess", lastName: "Ion", email, role: "teacher" },
@@ -273,7 +273,7 @@ async function openSession(email: string) {
 }
 
 test("sessions : refresh à rotation, rejeu détecté, changement de mot de passe sans déconnexion brutale", async () => {
-  const s = await openSession("sessions1@smartcampus.tn");
+  const s = await openSession("sessions1@gmail.com");
 
   // Le changement de mot de passe obligatoire ne coupe PAS le jeton d'accès courant (le front continue sa session)...
   assert.equal((await call("GET", `/users/${s.id}`, { token: s.first.body.token })).status, 200);
@@ -304,7 +304,7 @@ test("sessions : refresh à rotation, rejeu détecté, changement de mot de pass
 });
 
 test("déconnexion : logout termine la session ; logout-all invalide aussi les jetons d'accès déjà émis", async () => {
-  const s = await openSession("sessions2@smartcampus.tn");
+  const s = await openSession("sessions2@gmail.com");
 
   const a = await login(s.email, s.password);
   assert.equal((await call("POST", "/auth/logout", { body: { refreshToken: a.body.refreshToken } })).status, 200);
@@ -330,11 +330,11 @@ test("déconnexion : logout termine la session ; logout-all invalide aussi les j
 });
 
 test("observabilité : /metrics expose des séries par GABARIT de route (jamais d'URL réelle) et compte les connexions", async () => {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   await call("GET", `/users/${admin.body.user.id}`, { token: admin.body.token });
   await call("GET", `/v1/users/${admin.body.user.id}`, { token: admin.body.token });
   await call("GET", "/cette-route-nexiste-pas");
-  await login("admin@smartcampus.tn", "Admin2026!");
+  await login("admin@gmail.com", "Admin2026!");
 
   const res = await fetch(`${base}/metrics`);
   assert.equal(res.status, 200);
@@ -388,7 +388,7 @@ const COOKIE_MODE = { "X-Auth-Mode": "cookie" };
 
 test("cookies : la connexion pose deux cookies httpOnly et ne renvoie aucun jeton dans le corps", async () => {
   const jar = new Map<string, string>();
-  const res = await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@smartcampus.tn", password: "Admin2026!" });
+  const res = await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@gmail.com", password: "Admin2026!" });
   assert.equal(res.status, 200);
   assert.equal(res.body.token, undefined);
   assert.equal(res.body.refreshToken, undefined);
@@ -404,7 +404,7 @@ test("cookies : la connexion pose deux cookies httpOnly et ne renvoie aucun jeto
 
 test("cookies : sans l'en-tête X-Auth-Mode, le comportement historique est inchangé (jetons dans le corps, aucun cookie)", async () => {
   const jar = new Map<string, string>();
-  const res = await cookieCall("POST", "/auth/login", jar, {}, { email: "admin@smartcampus.tn", password: "Admin2026!" });
+  const res = await cookieCall("POST", "/auth/login", jar, {}, { email: "admin@gmail.com", password: "Admin2026!" });
   assert.equal(typeof res.body.token, "string");
   assert.equal(typeof res.body.refreshToken, "string");
   assert.equal(res.setCookies.length, 0);
@@ -412,16 +412,16 @@ test("cookies : sans l'en-tête X-Auth-Mode, le comportement historique est inch
 
 test("cookies : l'authentification par cookie fonctionne, et l'en-tête Bearer reste prioritaire", async () => {
   const jar = new Map<string, string>();
-  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@smartcampus.tn", password: "Admin2026!" });
+  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@gmail.com", password: "Admin2026!" });
   assert.equal((await cookieCall("GET", "/users", jar)).status, 200);
   assert.equal((await cookieCall("GET", "/users", new Map())).status, 401);
-  const bearer = await login("admin@smartcampus.tn", "Admin2026!");
+  const bearer = await login("admin@gmail.com", "Admin2026!");
   assert.equal((await cookieCall("GET", "/users", new Map([["sc_access", "poubelle"]]), { Authorization: `Bearer ${bearer.body.token}` })).status, 200);
 });
 
 test("cookies : CSRF — une requête qui modifie des données par cookie exige l'en-tête et une origine autorisée", async () => {
   const jar = new Map<string, string>();
-  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@smartcampus.tn", password: "Admin2026!" });
+  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@gmail.com", password: "Admin2026!" });
   // Sans l'en-tête personnalisé (ce que ferait un formulaire d'un site tiers) : refus, et la session n'est pas touchée.
   const noHeader = await cookieCall("POST", "/auth/logout-all", jar);
   assert.equal(noHeader.status, 403);
@@ -432,13 +432,13 @@ test("cookies : CSRF — une requête qui modifie des données par cookie exige 
   // Les lectures (GET) ne sont pas concernées, et l'authentification reste valable.
   assert.equal((await cookieCall("GET", "/users", jar)).status, 200);
   // Un client Bearer n'est pas soumis à cette règle (pas de cookie ambiant, donc pas de CSRF).
-  const bearer = await login("admin@smartcampus.tn", "Admin2026!");
+  const bearer = await login("admin@gmail.com", "Admin2026!");
   assert.equal((await call("POST", "/auth/logout-all", { token: bearer.body.token })).status, 200);
 });
 
 test("cookies : refresh avec rotation, rejeu détecté et cookies effacés, déconnexion qui retire les cookies", async () => {
   const jar = new Map<string, string>();
-  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@smartcampus.tn", password: "Admin2026!" });
+  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@gmail.com", password: "Admin2026!" });
   const firstRefresh = jar.get("sc_refresh")!;
 
   const r1 = await cookieCall("POST", "/auth/refresh", jar, COOKIE_MODE, {});
@@ -457,7 +457,7 @@ test("cookies : refresh avec rotation, rejeu détecté et cookies effacés, déc
   assert.equal((await cookieCall("POST", "/auth/refresh", new Map(), COOKIE_MODE, {})).status, 401);
 
   const fresh = new Map<string, string>();
-  await cookieCall("POST", "/auth/login", fresh, COOKIE_MODE, { email: "admin@smartcampus.tn", password: "Admin2026!" });
+  await cookieCall("POST", "/auth/login", fresh, COOKIE_MODE, { email: "admin@gmail.com", password: "Admin2026!" });
   const out = await cookieCall("POST", "/auth/logout", fresh, COOKIE_MODE, {});
   assert.equal(out.status, 200);
   assert.equal(fresh.size, 0, "les deux cookies sont retirés");
@@ -467,13 +467,13 @@ test("cookies : refresh avec rotation, rejeu détecté et cookies effacés, déc
 /* ------------------------------ Durcissement (audit de sécurité) ------------------------------ */
 
 test("mot de passe temporaire : le serveur n'autorise que le changement de mot de passe, le profil et la déconnexion", async () => {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   const created = await call("POST", "/users", {
     token: admin.body.token,
-    body: { firstName: "Second", lastName: "Admin", email: "admin2@smartcampus.tn", role: "admin" },
+    body: { firstName: "Second", lastName: "Admin", email: "admin2@gmail.com", role: "admin" },
   });
   const temp = created.body.demoTemporaryPassword;
-  const s = await login("admin2@smartcampus.tn", temp);
+  const s = await login("admin2@gmail.com", temp);
   const id = s.body.user.id;
 
   for (const [method, path] of [["GET", "/users"], ["GET", "/roles/permissions"], ["POST", "/users"], ["GET", "/v1/users"], ["GET", `/users/${admin.body.user.id}`]] as const) {
@@ -487,7 +487,7 @@ test("mot de passe temporaire : le serveur n'autorise que le changement de mot d
 });
 
 test("photo de profil : image `data:` vérifiée uniquement (pas d'URL externe, pas de faux contenu, taille limitée)", async () => {
-  const t = await login("karim@smartcampus.tn", "Nouveau2026");
+  const t = await login("karim@gmail.com", "Nouveau2026");
   const id = t.body.user.id;
   const put = (avatarUrl: string | null) => call("PUT", `/users/${id}/avatar`, { token: t.body.token, body: { avatarUrl } });
   const png = "data:image/png;base64," + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString("base64");
@@ -502,7 +502,7 @@ test("photo de profil : image `data:` vérifiée uniquement (pas d'URL externe, 
 
 test("mot de passe : plus de 72 octets refusé (bcrypt tronquerait en silence)", async () => {
   const r = await call("POST", "/auth/register", {
-    body: { firstName: "Long", lastName: "Pass", email: "long@smartcampus.tn", password: "Aa1" + "x".repeat(80) },
+    body: { firstName: "Long", lastName: "Pass", email: "long@gmail.com", password: "Aa1" + "x".repeat(80) },
   });
   assert.equal(r.status, 422);
 });
@@ -517,8 +517,8 @@ test("identifiant de requête : une valeur sobre du client est conservée, une v
 
 test("CSRF : un en-tête Authorization ou un jeton dans le corps ne contourne pas le contrôle quand NOS cookies sont présents", async () => {
   const jar = new Map<string, string>();
-  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@smartcampus.tn", password: "Admin2026!" });
-  const bearer = await login("admin@smartcampus.tn", "Admin2026!");
+  await cookieCall("POST", "/auth/login", jar, COOKIE_MODE, { email: "admin@gmail.com", password: "Admin2026!" });
+  const bearer = await login("admin@gmail.com", "Admin2026!");
 
   // Avant : avec un Bearer valide, le jeton du cookie n'était pas utilisé, donc le contrôle CSRF était sauté.
   const withBearer = await cookieCall("POST", "/auth/logout-all", jar, { Authorization: `Bearer ${bearer.body.token}` });
@@ -537,11 +537,11 @@ test("CSRF : un en-tête Authorization ou un jeton dans le corps ne contourne pa
 });
 
 test("mot de passe temporaire : la décision vient de la ROUTE (pas de l'URL) ; profil perso, mot de passe et déconnexion seulement", async () => {
-  const admin = await login("admin@smartcampus.tn", "Admin2026!");
+  const admin = await login("admin@gmail.com", "Admin2026!");
   const created = await call("POST", "/users", {
-    token: admin.body.token, body: { firstName: "Tmp", lastName: "Three", email: "tmp3@smartcampus.tn", role: "admin" },
+    token: admin.body.token, body: { firstName: "Tmp", lastName: "Three", email: "tmp3@gmail.com", role: "admin" },
   });
-  const session = await login("tmp3@smartcampus.tn", created.body.demoTemporaryPassword);
+  const session = await login("tmp3@gmail.com", created.body.demoTemporaryPassword);
   const id = session.body.user.id;
   const t = session.body.token;
 
