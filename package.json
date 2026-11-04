@@ -44,7 +44,7 @@
     "zod": "^4.6.7"
   },
   "optionalDependencies": {
-    "amqplib": "^0.10.5"
+    "amqplib": "^2.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
