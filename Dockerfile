@@ -25,6 +25,14 @@ RUN npm ci --omit=dev --ignore-scripts
 # ---- Étape 3 : image d'exécution minimale, sans droits root ----
 FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS runtime
 ENV NODE_ENV=production SCARF_ANALYTICS=false
+# Le conteneur de production n'a besoin QUE de `node` : on retire npm, npx, corepack et yarn (livrés avec l'image de base).
+#  - ils embarquent leurs propres dépendances (pacote, sigstore, picomatch, brace-expansion, ip-address…) que Trivy a signalées
+#    comme vulnérables alors que le service ne s'en sert jamais ;
+#  - un attaquant qui obtiendrait un shell dans le conteneur ne pourrait plus installer d'outils avec `npm install`.
+# Doit s'exécuter AVANT `USER node` (il faut les droits root pour supprimer).
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+           /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-*
 WORKDIR /app
 COPY --from=deps  --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist

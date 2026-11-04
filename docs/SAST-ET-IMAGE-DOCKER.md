@@ -186,7 +186,18 @@ Un agent DevSecOps indépendant (lecture seule) a relu workflows, Dockerfile, co
 
 ## 8. Résultats des premiers runs (GitHub)
 
-*(Section complétée après exécution : voir plus bas.)*
+| Analyse | Dépôt | Résultat |
+|---|---|---|
+| CI `check` (lint `--max-warnings 0`, types, build, audit, signatures, tests, couverture) | backend | succès |
+| CI (lint, types, format, tests, build, audit, signatures) | front | succès |
+| CodeQL (`security-extended`) | backend et front | analyse terminée en succès. *Je n'ai pas lu la liste des alertes (onglet Security → Code scanning) : « succès » signifie que l'analyse a tourné.* |
+| **Trivy sur l'image** | backend | **a trouvé 6 vulnérabilités HIGH corrigeables**, toutes dans `npm` (livré avec l'image Node), aucune dans l'application |
+
+**Ce que Trivy a trouvé** : `brace-expansion 2.0.2`, `ip-address 10.1.0`, `pacote 19.0.2` et `20.0.1`, `picomatch 4.0.3`, `sigstore 3.1.0`. `npm ls --omit=dev` n'en montre aucun dans l'arbre de production de l'application ; ils appartiennent à npm lui-même et à corepack.
+
+**Ce que j'ai fait** : retiré npm, npx, corepack et yarn de l'**image finale** (`RUN rm -rf …`, voir le Dockerfile). Le service n'en a pas besoin (`CMD ["node", …]`, sonde `wget`), et cela supprime aussi la possibilité d'installer des outils depuis un shell dans le conteneur. Ce n'est pas un contournement : la surface vulnérable n'existe plus, au lieu d'être masquée par un `.trivyignore`.
+
+**Reste à confirmer** : le run GitHub qui suit cette correction (l'image n'a pas pu être construite ni scannée en local, Docker étant arrêté). Voir `docs/PROBLEMES-ET-SOLUTIONS.md` n° 6.
 
 ---
 
