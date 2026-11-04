@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Étape 1 : compilation TypeScript ----
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -10,13 +10,13 @@ COPY src ./src
 RUN npm run build
 
 # ---- Étape 2 : dépendances de production seulement ----
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---- Étape 3 : image d'exécution minimale, sans droits root ----
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=deps  --chown=node:node /app/node_modules ./node_modules
